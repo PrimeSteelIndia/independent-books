@@ -448,8 +448,8 @@ def export_xml(company):
             if kind=='stock_item': mapped['CATEGORY']=record.get('category','Primary')
             if kind=='stock_item' and (record.get('hsn_code') or record.get('hsn')): mapped['HSNCODE']=str(record.get('hsn_code') or record.get('hsn'))
             if kind=='stock_item' and record.get('description'): mapped['DESCRIPTION']=str(record['description'])
-            if kind=='stock_item' and record.get('bom'):
-                bom = record['bom']
+            if kind=='stock_item' and (record.get('bom') or record.get('boms')):
+                bom = record.get('bom') or (record.get('boms')[0] if record.get('boms') else None)
                 if element.find('MULTICOMPONENTLIST.LIST') is None and isinstance(bom, dict):
                     bom_elem = ET.SubElement(element, 'MULTICOMPONENTLIST.LIST')
                     ET.SubElement(bom_elem, 'NAME').text = str(bom.get('name') or 'Standard BOM')

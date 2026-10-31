@@ -341,15 +341,18 @@ def _tax_ledger_type(ledger_name):
 
 def _get_cost_centre_allocations(entry):
     allocs = []
-    for ca in entries(entry, 'COSTCENTREALLOCATIONS.LIST'):
-        allocs.append(ca)
-    for cat in entries(entry, 'CATEGORYALLOCATIONS.LIST'):
-        cat_name = cat.get('CATEGORY') or cat.get('COSTCATEGORYNAME') or 'Primary Cost Category'
-        for ca in entries(cat, 'COSTCENTREALLOCATIONS.LIST'):
-            ca_copy = dict(ca)
-            if not ca_copy.get('CATEGORY') and not ca_copy.get('COSTCATEGORYNAME'):
-                ca_copy['CATEGORY'] = cat_name
-            allocs.append(ca_copy)
+    cat_entries = entries(entry, 'CATEGORYALLOCATIONS.LIST')
+    if cat_entries:
+        for cat in cat_entries:
+            cat_name = cat.get('CATEGORY') or cat.get('COSTCATEGORYNAME') or 'Primary Cost Category'
+            for ca in entries(cat, 'COSTCENTREALLOCATIONS.LIST'):
+                ca_copy = dict(ca)
+                if not ca_copy.get('CATEGORY') and not ca_copy.get('COSTCATEGORYNAME'):
+                    ca_copy['CATEGORY'] = cat_name
+                allocs.append(ca_copy)
+    else:
+        for ca in entries(entry, 'COSTCENTREALLOCATIONS.LIST'):
+            allocs.append(ca)
     return allocs
 
 def gst_components(company, taxable_amount, party_name=None, rate=None):
@@ -1825,7 +1828,7 @@ class Books:
         with self.transaction():
             c = self.get_company(company)
             ident = str(voucher_identity)
-            vch = next((v for v in c.get('vouchers', []) if ident in (str(v.get('MASTERID')), str(v.get('GUID')), str(v.get('VOUCHERNUMBER')))), None)
+            vch = next((v for v in c.get('vouchers', []) if (ident in (str(v.get('MASTERID')), str(v.get('GUID'))) or (str(v.get('VOUCHERNUMBER')) == ident and any(e.get('LEDGERNAME') == ledger_name for e in entries(v))))), None)
             if not vch:
                 raise ValueError(f"Voucher not found: {voucher_identity}")
             if not effective(vch):
@@ -2077,6 +2080,8 @@ class Books:
                     ledger_name = ac.get('ledger') or ac.get('LEDGERNAME')
                     amt = abs(decimal(ac.get('amount') or ac.get('AMOUNT') or 0, '0.01'))
                     if amt > Decimal('0'):
+                        if not ledger_name or ledger_name not in c.get('ledgers', {}):
+                            raise ValueError(f"Unknown or missing additional cost ledger: {ledger_name}")
                         total_additional_cost += amt
                         additional_ledger_entries.append({
                             'LEDGERNAME': ledger_name,
@@ -2204,7 +2209,11 @@ class Books:
             if sort_by == 'amount':
                 vouchers.sort(key=total_amount, reverse=reverse)
             elif sort_by == 'number':
-                vouchers.sort(key=lambda v: str(v.get('VOUCHERNUMBER', '')), reverse=reverse)
+                def nat_num_key(v):
+                    text = str(v.get('VOUCHERNUMBER', '')).strip()
+                    parts = re.split(r'(\d+)', text)
+                    return [int(p) if p.isdigit() else p.lower() for p in parts]
+                vouchers.sort(key=nat_num_key, reverse=reverse)
             else:
                 def sort_key(v):
                     mid = v.get('MASTERID')
@@ -2213,8 +2222,10 @@ class Books:
                 vouchers.sort(key=sort_key, reverse=reverse)
 
             total_count = len(vouchers)
-            page_size = max(1, int(page_size))
-            page = max(1, int(page))
+            try: page_size = max(1, int(page_size))
+            except (ValueError, TypeError): page_size = 50
+            try: page = max(1, int(page))
+            except (ValueError, TypeError): page = 1
             total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size

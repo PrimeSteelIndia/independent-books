@@ -51,7 +51,7 @@ class BooksServer(ThreadingHTTPServer):
 def data_view(db,company=None,start=None,end=None):
     c=db.view(company,start,end)
     today=dt.datetime.now().date()
-    return {'active_company':c.get('name',''),'company_meta':{k:v for k,v in c.items() if k not in ('vouchers','all_vouchers','ledgers','stock_items','source_imports')},
+    return {'active_company':c.get('name',''),'company_meta':{**{k:v for k,v in c.items() if k not in ('vouchers','all_vouchers','ledgers','stock_items','source_imports','pin_hash','pin_salt')},'is_pin_protected':bool(c.get('pin_hash'))},
             'companies':db.get_companies_list(),'current_date':today.strftime('%d-%b-%Y'),
             'current_date_iso':today.isoformat(),
             'fy_period':c.get('starting_from','')+' to '+c.get('ending_at',''),
