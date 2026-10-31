@@ -928,7 +928,10 @@ case 'closePrintPreview':return closePrintPreview();
 case 'doPrintFromPreview':closePrintPreview();return window.print();
 case 'doPrintConfigureFromPreview':closePrintPreview();return openPrintConfigure();case 'share':return showDialog('Share','<button class="list-row" data-action="exportHTML">Save current report as HTML</button><button class="list-row" data-action="exportCSV">Save current report as CSV</button>');
   case 'configure':return handleContextualConfigure();case 'billingAddField':{collectBillingProfileSettings();const type=state.dialog.billingType,profile=state.dialog.billingProfiles[type],index=profile.fields.length;profile.fields.splice(-1,0,{key:'field_'+index,label:'New Field',kind:'number',required:false});return renderBillingSettings();}case 'billingRemoveField':{collectBillingProfileSettings();const profile=state.dialog.billingProfiles[state.dialog.billingType],index=Number(args);if(profile.fields[index]?.kind==='calculated')return errorBox('The calculated amount field cannot be removed');profile.fields.splice(index,1);return renderBillingSettings();}case 'saveBillingProfiles':return saveBillingProfiles();
- case 'basis':return note(`Period: ${shownDate(d.from_date)} to ${shownDate(d.to_date)}. Stock uses moving weighted average cost.`);case 'view':return action('report',frame().name==='Trial Balance'?'Balance Sheet':'Trial Balance');case 'capability':return errorBox(args==='TallyCapital'?'TallyCapital is an external service and is not connected in this independent application.':args+' filing and statutory calculation are not implemented.');case 'checkUpdate':{try{const res=await api('/api/check_update');note(`${res.changelog} (Version ${res.current_version})`);}catch(e){note(e.message,true);}return;}
+ case 'basis':return note(`Period: ${shownDate(d.from_date)} to ${shownDate(d.to_date)}. Stock uses moving weighted average cost.`);case 'view':return action('report',frame().name==='Trial Balance'?'Balance Sheet':'Trial Balance');case 'capability':return errorBox(args==='TallyCapital'?'TallyCapital is an external service and is not connected in this independent application.':args+' filing and statutory calculation are not implemented.');case 'downloadUpdate':{closeDialog();const url=args||'https://idpbook.com';window.open(url,'_blank');return;}
+case 'dismissUpdate':{closeDialog();if(args)sessionStorage.setItem('ib_dismissed_update',args);note('Update reminder postponed for this session.');return;}
+case 'ignoreUpdate':{closeDialog();if(args)localStorage.setItem('ib_ignored_update',args);note(`Update notifications muted for v${args}.`);return;}
+case 'checkUpdate':{note('Checking for updates...');try{const res=await api('/api/check_update');if(res.update_available){showUpdateNotification(res);}else if(res.status==='offline'){note(`Independent Books is running in offline mode (v${res.current_version}). Connect to internet to check for updates.`);}else{note(`Independent Books is up-to-date (v${res.current_version}).`);}}catch(e){note('Unable to check for updates (working in offline mode).');}return;}
 case 'help':return showDialog('Help','<p>Arrow keys select. Enter opens. Esc returns to the previous screen.</p><p>Ctrl+A accepts. Alt+G opens Go To. F2 changes period/date. F3 selects company. F4–F9 select vouchers.</p><p>Data → Backup saves all companies. Import previews XML before committing.</p><div style="margin:12px 0; padding:10px 14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; font-size:12px;"><div style="font-weight:700; color:#047857; margin-bottom:4px;">Author & Support Inquiries:</div><div>Email: <a href="mailto:mossoassistant@gmail.com" target="_blank" style="color:#059669; font-weight:600; text-decoration:none;">mossoassistant@gmail.com</a></div><div style="margin-top:4px;">Instagram: <a href="https://www.instagram.com/wilde_sahil/" target="_blank" style="color:#d946ef; font-weight:600; text-decoration:none;">@wilde_sahil</a></div></div><div style="margin:12px 0;"><button type="button" class="list-row" data-action="checkUpdate">Check for Updates</button></div><div class="dialog-buttons"><button data-action="close">Close</button></div>');
 }}
 // Native Desktop Experience: Disable browser right-click context menu
@@ -1093,7 +1096,57 @@ if(/^F[4-9]$/.test(key)){event.preventDefault();const contextual=$('#keys [data-
   if(!editing&&frame().kind==='gateway'&&!event.ctrlKey&&!event.altKey){const options={c:['create'],a:['alter'],h:['masters','ledger'],v:['voucher'],k:['report','Day Book'],n:['menu','Banking'],b:['report','Balance Sheet'],p:['report','Profit & Loss A/c'],s:['report','Stock Summary'],r:['report','Ratio Analysis'],d:['menu','Display More Reports'],o:['dashboard'],q:['quit'],t:['specialThanks']};if(options[key.toLowerCase()]){event.preventDefault();return action(...options[key.toLowerCase()]);}}if(editing){if(key==='Backspace'&&event.target.tagName!=='TEXTAREA'){event.preventDefault();return focusPreviousControl(event.target);}if(key==='Enter'){if(event.target.tagName==='TEXTAREA'||event.target.name==='narration'){if(event.shiftKey)return;event.preventDefault();return accept();}event.preventDefault();if(event.target.tagName==='SELECT'){const inventoryRow=event.target.closest('.inventory-entry'),section=event.target.closest('.inventory-section');if(inventoryRow&&section&&!event.target.value&&inventoryRow===section.querySelector('.inventory-entry:last-child')){const extra=$('#extra-table [name=ledger]');if(extra){extra.focus();return;}}if(voucherRules.shouldAdvanceSelect(event.target))return focusNextControl(event.target);return chooseSelect(event.target);}if(event.target.closest('.inventory-entry')&&['rate','itemamount'].includes(event.target.name)&&ensureInvoiceRow(event.target.closest('.inventory-section')))return;if(event.target.closest('#extra-table')&&event.target.name==='amount'&&ensureExtraLedgerRow())return;return focusNextControl(event.target);}return;}if(['ArrowDown','ArrowUp'].includes(key)){event.preventDefault();selectRow((frame().cursor||0)+(key==='ArrowDown'?1:-1));$('#screen .selected')?.scrollIntoView({block:'nearest'});}if(key==='Enter'){event.preventDefault();$('#screen [data-row].selected')?.click();}
 }catch(error){errorBox(error.message);}});
 window.addEventListener('beforeunload',event=>{if(hasDirty()){event.preventDefault();event.returnValue='';}});
-refresh().then(render).catch(error=>errorBox(error.message));
+
+function showUpdateNotification(info) {
+  const highlightsHtml = (info.highlights && info.highlights.length)
+    ? `<ul style="margin:8px 0 12px 20px;text-align:left;font-size:12.5px;line-height:1.55;color:var(--text, #111);">${info.highlights.map(h => `<li style="margin-bottom:4px;">${esc(h)}</li>`).join('')}</ul>`
+    : `<p style="margin:8px 0 12px 0;font-size:13px;">${esc(info.changelog || 'A new update with performance and feature improvements is ready to download.')}</p>`;
+  
+  const body = `
+    <div style="padding:4px 4px;max-width:540px;text-align:left;">
+      <div style="font-size:15px;font-weight:700;color:var(--text, #111);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:18px;">✨</span> ${esc(info.title || 'Independent Books Update Available')}
+      </div>
+      <div style="font-size:12.5px;color:var(--dim, #666);margin-bottom:12px;">
+        Installed version: <strong style="color:var(--text, #222);">v${esc(info.current_version)}</strong> &nbsp;→&nbsp; Latest release: <strong style="color:#047857;background:#ecfdf5;padding:2px 6px;border-radius:4px;border:1px solid #a7f3d0;">v${esc(info.latest_version)}</strong>
+        ${info.release_date ? ` <span style="font-size:11px;opacity:0.8;margin-left:4px;">(${esc(info.release_date)})</span>` : ''}
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #059669;padding:10px 14px;border-radius:6px;margin-bottom:16px;">
+        <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#059669;margin-bottom:6px;">What's New in This Version:</div>
+        ${highlightsHtml}
+      </div>
+      <div class="dialog-buttons" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+        <button type="button" class="yes" style="background:#059669;color:#fff;font-weight:700;padding:7px 16px;border:none;border-radius:4px;cursor:pointer;" data-action="downloadUpdate" data-args="${esc(info.download_url || 'https://idpbook.com')}">
+          Download Update (idpbook.com)
+        </button>
+        <button type="button" data-action="dismissUpdate" data-args="${esc(info.latest_version)}" style="padding:7px 14px;border-radius:4px;cursor:pointer;">
+          Remind Me Later
+        </button>
+        <button type="button" data-action="ignoreUpdate" data-args="${esc(info.latest_version)}" style="padding:7px 12px;border-radius:4px;cursor:pointer;opacity:0.75;">
+          Skip this Version
+        </button>
+      </div>
+    </div>
+  `;
+  showDialog('Software Update Available', body, { className: 'data-dialog update-dialog' });
+}
+
+async function checkUpdateOnStartup() {
+  setTimeout(async () => {
+    try {
+      const res = await api('/api/check_update');
+      if (res && res.update_available) {
+        if (sessionStorage.getItem('ib_dismissed_update') === res.latest_version) return;
+        if (localStorage.getItem('ib_ignored_update') === res.latest_version) return;
+        showUpdateNotification(res);
+      }
+    } catch (_) {
+      // Quiet fail if offline or air-gapped
+    }
+  }, 3500);
+}
+
+refresh().then(()=>{render();checkUpdateOnStartup();}).catch(error=>errorBox(error.message));
 
 function captureForm() {
  if(!state.draft||!$('#edit-form'))return;

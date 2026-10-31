@@ -12,9 +12,39 @@ from books import Books, KINDS, InventoryWarning
 from interchange import _xml_safe_text, apply_import, preview_import, export_xml, generate_sample_template, bulk_import_masters
 
 ROOT=Path(__file__).parent
+APP_VERSION = '1.1.0'
 PAYLOAD_KEYS={'stock_item':'item','group':'group','unit':'unit','godown':'godown','voucher_type':'voucher_type',
               'stock_group':'stock_group','stock_category':'stock_category','cost_category':'category',
               'cost_centre':'centre','currency':'currency','ledger':'ledger'}
+
+
+def _parse_version_tuple(v):
+    import re
+    nums = re.findall(r'\d+', str(v or ''))
+    return tuple(int(x) for x in nums[:3]) if nums else (0, 0, 0)
+
+
+def _fetch_remote_version():
+    import urllib.request
+    import urllib.error
+    endpoints = [
+        'https://idpbook.com/version.json',
+        'https://raw.githubusercontent.com/zoro-roronoa74/independent-books/master/version.json'
+    ]
+    for url in endpoints:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={'User-Agent': f'IndependentBooks/{APP_VERSION} (Windows; OfflineFirst)'}
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    if isinstance(data, dict) and 'version' in data:
+                        return data
+        except Exception:
+            continue
+    return None
 
 
 class StorageLock:
@@ -108,14 +138,37 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                     if parsed.path=='/api/data': return self.send(data_view(db,query.get('company'),query.get('from'),query.get('to')))
                     if parsed.path=='/api/status': return self.send({'status':'online','independent':True,'companies':len(db.data['companies']),'application_root':str(ROOT.resolve()),'data_path':str(path)})
                     if parsed.path=='/api/check_update':
-                        return self.send({
-                            'status': 'success',
-                            'current_version': '1.0.0',
-                            'latest_version': '1.0.0',
-                            'update_available': False,
-                            'changelog': 'Independent Books is up-to-date (v1.0.0, air-gapped local build).',
-                            'release_url': 'https://github.com/zoro-roronoa74/independent-books/releases'
-                        })
+                        current_tup = _parse_version_tuple(APP_VERSION)
+                        info = _fetch_remote_version()
+                        if info:
+                            remote_ver = info.get('version', APP_VERSION)
+                            remote_tup = _parse_version_tuple(remote_ver)
+                            update_avail = (remote_tup > current_tup)
+                            return self.send({
+                                'status': 'success',
+                                'current_version': APP_VERSION,
+                                'latest_version': remote_ver,
+                                'update_available': update_avail,
+                                'title': info.get('name', f'Independent Books v{remote_ver} Available'),
+                                'release_date': info.get('release_date', ''),
+                                'highlights': info.get('highlights', []),
+                                'download_url': info.get('download_url', 'https://idpbook.com'),
+                                'changelog': info.get('changelog', '') or f'Independent Books v{remote_ver} is now available.'
+                            })
+                        else:
+                            return self.send({
+                                'status': 'offline',
+                                'current_version': APP_VERSION,
+                                'latest_version': APP_VERSION,
+                                'update_available': False,
+                                'changelog': f'Independent Books is running in offline mode (v{APP_VERSION}).',
+                                'download_url': 'https://idpbook.com'
+                            })
+                    if parsed.path=='/version.json':
+                        vpath = ROOT / 'version.json'
+                        if vpath.exists():
+                            return self.send(json.loads(vpath.read_text(encoding='utf-8')))
+                        return self.send({'version': APP_VERSION})
                     if parsed.path=='/api/is_company_locked':
                         company=query.get('company') or db.get_active_company_name()
                         if not company: raise ValueError('Company is required')

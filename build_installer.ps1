@@ -48,7 +48,8 @@ $CoreFiles = @(
     "logo.png",
     "favicon.ico",
     "app.ico",
-    "manifest.json"
+    "manifest.json",
+    "version.json"
 )
 
 Write-Host "`nVerifying core application assets..." -ForegroundColor Yellow
@@ -79,7 +80,8 @@ $HasNative = (Test-Path (Join-Path $NativeDist "app_server.exe")) -and (-not $Sk
 if ($HasNative) {
     Write-Host "`n[NATIVE COMPILATION] Packaging compiled C machine code binary (Zero Python source files)..." -ForegroundColor Cyan
     Copy-Item -Path "$NativeDist\*" -Destination $AppStage -Recurse -Force
-    $FrontendFiles = @("index.html", "fidelity.css", "workflows.js", "voucher_logic.js", "lookup_context.js", "print_view.js", "date_picker.js", "Launch.ps1", "Launch.vbs", "logo.png", "favicon.ico", "app.ico", "manifest.json")
+    $FrontendFiles = @("index.html", "fidelity.css", "workflows.js", "voucher_logic.js", "lookup_context.js", "print_view.js", "date_picker.js", "Launch.ps1", "Launch.vbs", "logo.png", "favicon.ico", "app.ico", "manifest.json",
+    "version.json")
     foreach ($file in $FrontendFiles) {
         Copy-Item -Path (Join-Path $AppRoot $file) -Destination $AppStage -Force
     }
@@ -110,6 +112,15 @@ if ($HasNative) {
 
 # Add installed marker
 Set-Content -Path (Join-Path $AppStage "installed.marker") -Value "independent-books-installed" -Encoding UTF8
+
+# 3b. Build Portable ZIP Package
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$PortableZipPath = Join-Path $DistPath "IndependentBooks_Portable.zip"
+Write-Host "`nGenerating standalone Portable ZIP package..." -ForegroundColor Yellow
+if (Test-Path $PortableZipPath) { Remove-Item $PortableZipPath -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory($AppStage, $PortableZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+Write-Host "  [OK] Portable ZIP created: $('{0:N2} MB' -f ((Get-Item $PortableZipPath).Length / 1MB))" -ForegroundColor Green
+
 
 # 4. Generate Native Windows Launcher (IndependentBooks.exe)
 $cscPath = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
@@ -334,7 +345,7 @@ if ($InnoCompiler) {
     $IssContent = @"
 [Setup]
 AppName=Independent Books
-AppVersion=1.0.0
+AppVersion=1.1.0
 DefaultDirName={localappdata}\Programs\IndependentBooks
 DefaultGroupName=Independent Books
 OutputDir=$DistPath
