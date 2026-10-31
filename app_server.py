@@ -84,8 +84,20 @@ def make_server(port=3543,data_path=None,allow_lan=False):
             self.end_headers();self.wfile.write(body)
         def do_GET(self):
             try:
-                if self.headers.get('Host','') not in ('127.0.0.1:'+str(self.server.server_port),'localhost:'+str(self.server.server_port)):
-                    return self.send({'error':'Invalid local host'},403)
+                port_str = str(self.server.server_port)
+                allowed_hosts = {'127.0.0.1:' + port_str, 'localhost:' + port_str}
+                if getattr(self.server, 'allow_lan', False):
+                    host_header = self.headers.get('Host', '')
+                    host_name = host_header.split(':')[0]
+                    import ipaddress
+                    try:
+                        ip = ipaddress.ip_address(host_name)
+                        if ip.is_private:
+                            allowed_hosts.add(host_header)
+                    except ValueError:
+                        pass
+                if self.headers.get('Host', '') not in allowed_hosts:
+                    return self.send({'error': 'Invalid local host'}, 403)
                 parsed=urlparse(self.path);query={k:v[0] for k,v in parse_qs(parsed.query).items()}
                 with db.lock:
                     if parsed.path=='/api/data': return self.send(data_view(db,query.get('company'),query.get('from'),query.get('to')))
@@ -97,7 +109,7 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                             'latest_version': '1.0.0',
                             'update_available': False,
                             'changelog': 'Independent Books is up-to-date (v1.0.0, air-gapped local build).',
-                            'release_url': 'https://github.com/independentbooks/releases'
+                            'release_url': 'https://github.com/zoro-roronoa74/independent-books/releases'
                         })
                     if parsed.path=='/api/last_narration':
                         company=query.get('company')
@@ -156,12 +168,25 @@ def make_server(port=3543,data_path=None,allow_lan=False):
             except Exception as error: self.send({'status':'error','error':str(error)},400)
         def do_POST(self):
             try:
-                if not getattr(self.server, 'allow_lan', False):
-                    if self.headers.get('Host','') not in ('127.0.0.1:'+str(self.server.server_port),'localhost:'+str(self.server.server_port)):
-                        return self.send({'error':'Invalid local host'},403)
-                    origin=self.headers.get('Origin')
-                    if origin and origin not in ('http://127.0.0.1:'+str(self.server.server_port),'http://localhost:'+str(self.server.server_port)):
-                        return self.send({'error':'Cross-origin writes are not permitted'},403)
+                port_str = str(self.server.server_port)
+                allowed_hosts = {'127.0.0.1:' + port_str, 'localhost:' + port_str}
+                if getattr(self.server, 'allow_lan', False):
+                    host_header = self.headers.get('Host', '')
+                    host_name = host_header.split(':')[0]
+                    import ipaddress
+                    try:
+                        ip = ipaddress.ip_address(host_name)
+                        if ip.is_private:
+                            allowed_hosts.add(host_header)
+                    except ValueError:
+                        pass
+                if self.headers.get('Host', '') not in allowed_hosts:
+                    return self.send({'error': 'Invalid host header'}, 403)
+                origin = self.headers.get('Origin')
+                if origin:
+                    parsed_orig = urlparse(origin)
+                    if parsed_orig.netloc not in allowed_hosts:
+                        return self.send({'error': 'Cross-origin writes are not permitted'}, 403)
                 length=int(self.headers.get('Content-Length',0))
                 if length<1 or length>32*1024*1024: return self.send({'error':'Request size must be 1 byte to 32 MiB'},413)
                 raw=self.rfile.read(length).decode('utf-8');path=urlparse(self.path).path

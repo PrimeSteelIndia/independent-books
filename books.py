@@ -46,11 +46,22 @@ class InventoryWarning(ValueError):
 
 
 def decimal(value, quantum=None):
-    try: amount = Decimal(str(value or 0).replace(',', '').split()[0])
-    except (InvalidOperation, IndexError): raise ValueError('Invalid numeric amount')
-    if not amount.is_finite(): raise ValueError('Amount must be finite')
+    if value is None or (isinstance(value, str) and not value.strip()):
+        amount = Decimal('0')
+    elif isinstance(value, (int, Decimal)):
+        amount = Decimal(value)
+    elif isinstance(value, float):
+        amount = Decimal(str(value))
+    else:
+        text = str(value).strip().replace(',', '').replace('₹', '')
+        cleaned = text.replace(' ', '')
+        try:
+            amount = Decimal(cleaned)
+        except (InvalidOperation, ValueError):
+            raise ValueError('Invalid numeric amount')
+    if not amount.is_finite():
+        raise ValueError('Amount must be finite')
     return amount.quantize(Decimal(quantum), rounding=ROUND_HALF_UP) if quantum else amount
-
 
 def date_key(value):
     text = str(value or '').strip()
@@ -311,6 +322,13 @@ def party_outstanding(company, name):
             'classification':_party_classification(company, name) or 'party', 'bill_count':bill_count}
 
 
+def _resolve_state(entity):
+    if not entity: return ''
+    state = str(entity.get('state') or '').strip().lower()
+    if state: return state
+    gstin = str(entity.get('gstin') or '').strip()
+    return gstin[:2].lower() if len(gstin) >= 2 and gstin[:2].isdigit() else ''
+
 def gst_components(company, taxable_amount, party_name=None, rate=None):
     """Calculate local CGST/SGST or interstate IGST for an invoice."""
     if not company.get('gstin'): return []
@@ -319,7 +337,9 @@ def gst_components(company, taxable_amount, party_name=None, rate=None):
     tax_rate = decimal(rate if rate not in (None, '') else party.get('tax_rate', 0))
     if taxable <= 0 or tax_rate <= 0: return []
     total = (taxable * tax_rate / Decimal('100')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    same_state = not party.get('state') or not company.get('state') or str(party.get('state')).strip().lower() == str(company.get('state')).strip().lower()
+    party_st = _resolve_state(party)
+    comp_st = _resolve_state(company)
+    same_state = bool(party_st and comp_st and party_st == comp_st)
     if not same_state: return [{'ledger':'IGST','amount':str(total),'drcr':'Cr','rate':f'{tax_rate:.2f}'}]
     half_rate = tax_rate / Decimal('2')
     cgst = (total / Decimal('2')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -331,15 +351,15 @@ def calculate_item_gst(company, party_name, items):
     if not company.get('gstin'):
         return []
     party = company.get('ledgers', {}).get(party_name or '', {})
-    party_state = str(party.get('state') or '').strip().lower()
-    company_state = str(company.get('state') or '').strip().lower()
-    same_state = not party_state or not company_state or party_state == company_state
+    party_st = _resolve_state(party)
+    comp_st = _resolve_state(company)
+    same_state = bool(party_st and comp_st and party_st == comp_st)
 
     totals = {}
     for entry in items:
         item_name = entry.get('item') or entry.get('STOCKITEMNAME')
         item_record = company.get('stock_items', {}).get(item_name or '', {})
-        rate_val = entry.get('gst_rate') if 'gst_rate' in entry else entry.get('rate', item_record.get('gst_rate', 0))
+        rate_val = entry.get('gst_rate') if 'gst_rate' in entry else item_record.get('gst_rate', party.get('tax_rate', 0))
         rate = decimal(rate_val if rate_val not in (None, '') else 0)
         if rate <= Decimal('0'):
             continue
@@ -377,6 +397,8 @@ class Books:
         self.connection = sqlite3.connect(path, check_same_thread=False, timeout=15)
         self.connection.execute('PRAGMA journal_mode=WAL')
         self.connection.execute('PRAGMA synchronous=FULL')
+        self.connection.execute('PRAGMA auto_vacuum=INCREMENTAL')
+        self.connection.execute('PRAGMA journal_size_limit=67108864')
         self.connection.execute('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
         self.connection.execute('CREATE TABLE IF NOT EXISTS history (revision INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, payload TEXT NOT NULL)')
         row = self.connection.execute('SELECT payload FROM state WHERE id=1').fetchone()
@@ -403,6 +425,18 @@ class Books:
         with self.connection:
             self.connection.execute('INSERT OR REPLACE INTO state(id,payload) VALUES(1,?)',(payload,))
             self.connection.execute('INSERT INTO history(time,payload) VALUES(?,?)',(dt.datetime.now(dt.timezone.utc).isoformat(),payload))
+            self.connection.execute('''
+                DELETE FROM history
+                WHERE revision NOT IN (
+                    SELECT revision FROM history ORDER BY revision DESC LIMIT 30
+                )
+                AND revision NOT IN (
+                    SELECT MIN(revision) FROM history
+                    WHERE time >= datetime('now', '-60 days')
+                    GROUP BY substr(time, 1, 10)
+                );
+            ''')
+            self.connection.execute('PRAGMA incremental_vacuum(50);')
 
     def save(self):
         with self.lock:
@@ -686,6 +720,16 @@ class Books:
                     row = ensure_row(bill_id, ledger, 'On Account', party, voucher.get('DATE', ''), '', source,
                                      'unallocated')
                     row['signed_pending'] += signed_part(residual, signed_entry)
+        for alloc_rec in company.get('allocation_records', []):
+            if alloc_rec.get('state') in ('committed', 'prepared'):
+                for alloc in alloc_rec.get('allocations', []):
+                    b_id = alloc.get('bill_id')
+                    a_val = abs(decimal(alloc.get('amount') or 0, '0.01'))
+                    method = alloc.get('method') or alloc_rec.get('method')
+                    if method == 'Agst Ref' and b_id in rows:
+                        orig_sign = 1 if rows[b_id]['signed_pending'] >= 0 else -1
+                        rows[b_id]['signed_pending'] -= orig_sign * a_val
+
         result = []
         for row in rows.values():
             row['pending'] = abs(row['signed_pending'])
@@ -715,7 +759,7 @@ class Books:
             raise ValueError('Unknown allocation method')
         rows = allocations or []
         pending = {row['bill_id']: row for row in self._bill_rows(company, as_of, exclude_voucher_id)
-                   if row['ledger'] == ledger and row.get('reference_kind') == 'bill'}
+                   if row['ledger'] == ledger}
         normalized = []
         allocated = Decimal('0.00')
         by_bill = {}
@@ -729,7 +773,10 @@ class Books:
             if row_method == 'Agst Ref' and bill_id and not bill:
                 all_bills = {item['bill_id']: item for item in self._bill_rows(company)}
                 if bill_id in all_bills:
-                    raise ValueError('Allocation belongs to another party')
+                    if all_bills[bill_id]['ledger'] != ledger:
+                        raise ValueError('Allocation belongs to another party')
+                    else:
+                        raise ValueError('Bill reference is not available for settlement')
                 raise ValueError('Unknown bill ID')
             if row_method == 'Agst Ref' and not bill and not bill_id and name:
                 matches = [item for item in pending.values() if item['name'] == name]
@@ -774,7 +821,7 @@ class Books:
                     if decimal(result['residual']):
                         raise ValueError('Allocation sum must equal entry amount; assign the residual explicitly')
                     self.get_company(company).setdefault('allocation_records', []).append({
-                        'ledger': ledger, 'state': 'prepared', 'method': method, **result,
+                        'ledger': ledger, 'state': 'committed', 'method': method, **result,
                     })
                     return result
             return self._normalize_bill_allocations(self.get_company(company), ledger,
@@ -988,6 +1035,8 @@ class Books:
     def _validate_voucher(self,c,v):
         v['DATE']=date_key(v.get('DATE'))
         if v['DATE'] < (c.get('books_from') or c['starting_from']): raise ValueError('Voucher date precedes company books')
+        ending_at = c.get('ending_at')
+        if ending_at and v['DATE'] > date_key(ending_at): raise ValueError('Voucher date exceeds financial year end date')
         vtype=v.get('VOUCHERTYPENAME','')
         if vtype not in c['voucher_types']: raise ValueError('Unknown voucher type')
         if v.get('PARTYLEDGERNAME') and v['PARTYLEDGERNAME'] not in c['ledgers']: raise ValueError('Unknown party ledger: '+v['PARTYLEDGERNAME'])
@@ -1002,7 +1051,7 @@ class Books:
         for key in ('ALLINVENTORYENTRIES.LIST','INVENTORYENTRIES.LIST','CONSUMPTIONENTRIES.LIST','PRODUCTIONENTRIES.LIST','PHYSICALSTOCKENTRIES.LIST'):
             for item in entries(v,key):
                 if item.get('STOCKITEMNAME') not in c['stock_items']: raise ValueError('Unknown stock item: '+str(item.get('STOCKITEMNAME')))
-                decimal(item.get('ACTUALQTY',item.get('BILLEDQTY',0)))
+                _quantity_in_base(c, c['stock_items'][item.get('STOCKITEMNAME')], item.get('ACTUALQTY',item.get('BILLEDQTY',0)))
 
     def post_voucher(self,company,voucher,expected_revision=None,
                      allow_inventory_warning=False, warning_token=None):
@@ -1154,7 +1203,14 @@ class Books:
             base=c.get('voucher_type_records',{}).get(v['VOUCHERTYPENAME'],{}).get('base_type',v['VOUCHERTYPENAME'])
             if base not in NON_ACCOUNTING:
                 for entry in entries(v):
-                    ledger=c['ledgers'][entry['LEDGERNAME']]; amount=entry_debit(entry)
+                    ledger=c['ledgers'].get(entry['LEDGERNAME'])
+                    if not ledger:
+                        ledger=c['ledgers'].setdefault(entry['LEDGERNAME'], {
+                            'name': entry['LEDGERNAME'], 'parent': 'Suspense A/c',
+                            'opening_balance': '0.00', 'signed_opening': '0.00',
+                            'signed_closing': '0.00', 'closing_balance': '0.00', 'closing_drcr': 'Dr'
+                        })
+                    amount=entry_debit(entry)
                     ledger['signed_closing']=str(decimal(ledger['signed_closing'],'0.01')+amount)
                     for bill in entries(entry,'BILLALLOCATIONS.LIST'):
                         if bill.get('BILLTYPE') in ('On Account','Advance'): continue
@@ -1168,8 +1224,11 @@ class Books:
                 rate=value/old_qty if old_qty else decimal(item.get('closing_rate',0))
                 if physical: item['closing_qty']=str(qty);item['closing_balance']=str((qty*rate).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
                 else:
-                    if old_qty+qty*direction<0 and str(c.get('negative_stock_policy', 'warn')).lower() == 'block':
-                        raise ValueError('Insufficient stock: '+item_record['STOCKITEMNAME']+' on '+v['DATE'])
+                    if old_qty+qty*direction<0:
+                        item.setdefault('shortages', []).append({
+                            'voucher': v.get('VOUCHERNUMBER'), 'date': v.get('DATE'),
+                            'deficit': str(abs(old_qty+qty*direction))
+                        })
                     cost=abs(decimal(item_record.get('AMOUNT'),'0.01')) if direction>0 and base not in ('Credit Note','Rejections In') else (qty*rate).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
                     item['closing_qty']=str(old_qty+qty*direction);item['closing_balance']=str(value+cost*direction)
                 if decimal(item['closing_qty']): item['closing_rate']=str(decimal(item['closing_balance'])/decimal(item['closing_qty']))
@@ -1456,10 +1515,11 @@ class Books:
 
     def view(self,company=None,from_date=None,to_date=None):
         with self.lock:
-            c=copy.deepcopy(self.get_company(company))
-            if not c: return {}
-            start=date_key(from_date or c['starting_from']);end=date_key(to_date or c['ending_at'])
+            cmp_obj = self.get_company(company)
+            if not cmp_obj: return {}
+            start=date_key(from_date or cmp_obj['starting_from']);end=date_key(to_date or cmp_obj['ending_at'])
             if end<start: raise ValueError('Period end precedes start')
+            c=copy.deepcopy(cmp_obj)
             self._rebuild(c,end)
             prior=copy.deepcopy(c);self._rebuild(prior,(dt.datetime.strptime(start,'%Y%m%d').date()-dt.timedelta(days=1)).strftime('%Y%m%d'))
             for name,l in c['ledgers'].items():
