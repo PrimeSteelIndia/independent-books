@@ -804,3 +804,413 @@ def test_edge_cases_empty_and_boundaries(tmp_path):
     reg_oob = b.voucher_register(comp, page=50, page_size=10)
     assert reg_oob['total_count'] == 2
     assert reg_oob['items'] == []
+
+
+def test_gstr1_credit_notes_and_reconciliation(tmp_path):
+    """Test GSTR-1 correctly segregates B2B Credit Notes into CDNR and nets B2CS returns."""
+    b = Books(tmp_path / "gst_cn_test.sqlite3")
+    b.create_or_alter_company({
+        'name': 'GST CN Co',
+        'starting_from': '20260401',
+        'ending_at': '20270331',
+        'state': 'West Bengal',
+        'gstin': '19AAAAA0000A1Z5'
+    })
+    comp = 'GST CN Co'
+
+    b.save_master(comp, 'unit', {'name': 'pcs', 'factor': '1'})
+    b.save_master(comp, 'stock_item', {
+        'name': 'Widget A', 'base_units': 'pcs', 'gst_rate': '18',
+        'hsn_code': '8400', 'opening_qty': '100', 'opening_rate': '100.00'
+    })
+    b.save_master(comp, 'ledger', {'name': 'Sales A/c', 'parent': 'Sales Accounts', 'opening_balance': '0.00'})
+    b.save_master(comp, 'ledger', {
+        'name': 'Registered Client', 'parent': 'Sundry Debtors',
+        'gstin': '19XYZAB1234C1Z9', 'state': 'West Bengal', 'opening_balance': '0.00'
+    })
+    b.save_master(comp, 'ledger', {
+        'name': 'Retail Consumer', 'parent': 'Sundry Debtors',
+        'gstin': '', 'state': 'West Bengal', 'opening_balance': '0.00'
+    })
+
+    # 1. B2B Sale of 10,000 + 18% GST (900 CGST + 900 SGST) = 11,800
+    b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Sales',
+        'VOUCHERNUMBER': 'INV-001',
+        'DATE': '20260405',
+        'PARTYLEDGERNAME': 'Registered Client',
+        'ALLINVENTORYENTRIES.LIST': [
+            {'STOCKITEMNAME': 'Widget A', 'ACTUALQTY': '10 pcs', 'BILLEDQTY': '10 pcs', 'RATE': '1000.00', 'AMOUNT': '10000.00'}
+        ],
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Registered Client', 'AMOUNT': '11800.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Sales A/c', 'AMOUNT': '-10000.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'CGST', 'AMOUNT': '-900.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'SGST', 'AMOUNT': '-900.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+
+    # 2. B2B Credit Note (Return of 2 pcs): 2,000 + 18% GST (180 CGST + 180 SGST) = 2,360
+    b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Credit Note',
+        'VOUCHERNUMBER': 'CN-001',
+        'DATE': '20260410',
+        'PARTYLEDGERNAME': 'Registered Client',
+        'ALLINVENTORYENTRIES.LIST': [
+            {'STOCKITEMNAME': 'Widget A', 'ACTUALQTY': '2 pcs', 'BILLEDQTY': '2 pcs', 'RATE': '1000.00', 'AMOUNT': '2000.00'}
+        ],
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Registered Client', 'AMOUNT': '-2360.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'Sales A/c', 'AMOUNT': '2000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'CGST', 'AMOUNT': '180.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'SGST', 'AMOUNT': '180.00', 'ISDEEMEDPOSITIVE': 'Yes'}
+        ]
+    })
+
+    # 3. B2CS Retail Sale: 5,000 + 18% GST (450 CGST + 450 SGST) = 5,900
+    b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Sales',
+        'VOUCHERNUMBER': 'INV-RET-01',
+        'DATE': '20260412',
+        'PARTYLEDGERNAME': 'Retail Consumer',
+        'ALLINVENTORYENTRIES.LIST': [
+            {'STOCKITEMNAME': 'Widget A', 'ACTUALQTY': '5 pcs', 'BILLEDQTY': '5 pcs', 'RATE': '1000.00', 'AMOUNT': '5000.00'}
+        ],
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Retail Consumer', 'AMOUNT': '5900.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Sales A/c', 'AMOUNT': '-5000.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'CGST', 'AMOUNT': '-450.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'SGST', 'AMOUNT': '-450.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+
+    # 4. B2CS Retail Return (Credit Note): 1,000 + 18% GST (90 CGST + 90 SGST) = 1,180
+    b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Credit Note',
+        'VOUCHERNUMBER': 'CN-RET-01',
+        'DATE': '20260414',
+        'PARTYLEDGERNAME': 'Retail Consumer',
+        'ALLINVENTORYENTRIES.LIST': [
+            {'STOCKITEMNAME': 'Widget A', 'ACTUALQTY': '1 pcs', 'BILLEDQTY': '1 pcs', 'RATE': '1000.00', 'AMOUNT': '1000.00'}
+        ],
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Retail Consumer', 'AMOUNT': '-1180.00', 'ISDEEMEDPOSITIVE': 'No'},
+            {'LEDGERNAME': 'Sales A/c', 'AMOUNT': '1000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'CGST', 'AMOUNT': '90.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'SGST', 'AMOUNT': '90.00', 'ISDEEMEDPOSITIVE': 'Yes'}
+        ]
+    })
+
+    # Run GSTR-1
+    g1 = b.gstr1_report(comp, '20260401', '20260430')
+
+    # B2B must have only the invoice (INV-001)
+    assert len(g1['b2b']) == 1
+    assert len(g1['b2b'][0]['inv']) == 1
+    assert g1['b2b'][0]['inv'][0]['inum'] == 'INV-001'
+
+    # CDNR must have the credit note (CN-001) with ntty: 'C'
+    assert len(g1['cdnr']) == 1
+    assert g1['cdnr'][0]['ctin'] == '19XYZAB1234C1Z9'
+    assert len(g1['cdnr'][0]['nt']) == 1
+    assert g1['cdnr'][0]['nt'][0]['nt_num'] == 'CN-001'
+    assert g1['cdnr'][0]['nt'][0]['ntty'] == 'C'
+    assert g1['cdnr'][0]['nt'][0]['val'] == 2360.0
+
+    # B2CS must be NET of return: 5,000 - 1,000 = 4,000 taxable; CGST 360, SGST 360
+    assert len(g1['b2cs']) == 1
+    assert g1['b2cs'][0]['txval'] == 4000.0
+    assert g1['b2cs'][0]['camt'] == 360.0
+    assert g1['b2cs'][0]['samt'] == 360.0
+
+    # Table 12 HSN: must have 'num': 1 and net qty = 10 - 2 + 5 - 1 = 12 pcs, net txval = 12,000
+    assert len(g1['hsn']['data']) == 1
+    hsn_row = g1['hsn']['data'][0]
+    assert hsn_row['num'] == 1
+    assert hsn_row['hsn_sc'] == '8400'
+    assert hsn_row['qty'] == 12.0
+    assert hsn_row['txval'] == 12000.0
+
+    # Summary net outward supplies:
+    # Net taxable = (10,000 - 2,000) + (5,000 - 1,000) = 12,000
+    # Net CGST = 900 - 180 + 450 - 90 = 1080
+    assert decimal(g1['summary']['total_taxable_value']) == Decimal('12000.00')
+    assert decimal(g1['summary']['total_cgst']) == Decimal('1080.00')
+    assert decimal(g1['summary']['total_sgst']) == Decimal('1080.00')
+
+    # GSTR-3B Table 3.1 outward taxable supplies must reconcile exactly:
+    g3 = b.gstr3b_report(comp, '20260401', '20260430')
+    t31 = g3['table_3_1']['outward_taxable_supplies']
+    assert decimal(t31['txval']) == Decimal('12000.00')
+    assert decimal(t31['camt']) == Decimal('1080.00')
+    assert decimal(t31['samt']) == Decimal('1080.00')
+
+
+def test_credit_limit_journal_and_guid_alteration(tmp_path):
+    """Test credit limit blocks journal debits and altering by GUID works without double counting."""
+    b = Books(tmp_path / "cl_journal.sqlite3")
+    b.create_or_alter_company({
+        'name': 'CL Journal Co',
+        'starting_from': '20260401',
+        'ending_at': '20270331',
+    })
+    comp = 'CL Journal Co'
+
+    # Master with 20,000 credit limit
+    b.save_master(comp, 'ledger', {
+        'name': 'Client A', 'parent': 'Sundry Debtors',
+        'opening_balance': '0.00', 'credit_limit': '20000.00'
+    })
+    b.save_master(comp, 'ledger', {'name': 'Service Revenue', 'parent': 'Direct Incomes', 'opening_balance': '0.00'})
+
+    # 1. Negative credit limit rejected in save_master
+    with pytest.raises(ValueError, match="Credit limit cannot be negative"):
+        b.save_master(comp, 'ledger', {'name': 'Bad Limit', 'parent': 'Sundry Debtors', 'credit_limit': '-500'})
+
+    # 2. Journal voucher without PARTYLEDGERNAME header that debits Client A by 25,000 -> Blocked!
+    with pytest.raises(ValueError, match="Credit limit .* exceeded for Client A"):
+        b.post_voucher(comp, {
+            'VOUCHERTYPENAME': 'Journal',
+            'VOUCHERNUMBER': 'J-01',
+            'DATE': '20260405',
+            'ALLLEDGERENTRIES.LIST': [
+                {'LEDGERNAME': 'Client A', 'AMOUNT': '25000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+                {'LEDGERNAME': 'Service Revenue', 'AMOUNT': '-25000.00', 'ISDEEMEDPOSITIVE': 'No'}
+            ]
+        })
+
+    # 3. Journal voucher within limit: 15,000 -> Succeeds
+    v_id = b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Journal',
+        'VOUCHERNUMBER': 'J-01',
+        'DATE': '20260405',
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Client A', 'AMOUNT': '15000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Service Revenue', 'AMOUNT': '-15000.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+    c = b.get_company(comp)
+    voucher = next(v for v in c['vouchers'] if str(v.get('MASTERID')) == str(v_id))
+    guid = voucher.get('GUID')
+
+    # 4. Alter existing voucher by GUID: changing amount from 15,000 to 18,000 (still <= 20,000 limit)
+    # If old was not excluded, it would think 15,000 + 18,000 = 33,000 > 20,000 and fail!
+    altered_id = b.post_voucher(comp, {
+        '@ACTION': 'Alter',
+        'GUID': guid,
+        'VOUCHERTYPENAME': 'Journal',
+        'VOUCHERNUMBER': 'J-01',
+        'DATE': '20260405',
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Client A', 'AMOUNT': '18000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Service Revenue', 'AMOUNT': '-18000.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+    assert altered_id is not None
+    assert b.party_balance(comp, 'Client A') == Decimal('18000.00')
+
+
+def test_manufacturing_multigodown_and_split_balancing(tmp_path):
+    """Test Manufacturing Journal with components from multiple godowns and distinct balancing ledgers."""
+    b = Books(tmp_path / "mfg_multi.sqlite3")
+    b.create_or_alter_company({
+        'name': 'Mfg Multi Co',
+        'starting_from': '20260401',
+        'ending_at': '20270331',
+    })
+    comp = 'Mfg Multi Co'
+
+    b.save_master(comp, 'unit', {'name': 'kg', 'factor': '1'})
+    b.save_master(comp, 'unit', {'name': 'nos', 'factor': '1'})
+    b.save_master(comp, 'godown', {'name': 'Warehouse North'})
+    b.save_master(comp, 'godown', {'name': 'Warehouse South'})
+    b.save_master(comp, 'godown', {'name': 'Assembly Plant'})
+    b.save_master(comp, 'ledger', {'name': 'Wages', 'parent': 'Direct Expenses', 'opening_balance': '0.00'})
+    b.save_master(comp, 'ledger', {'name': 'Electricity', 'parent': 'Direct Expenses', 'opening_balance': '0.00'})
+    b.save_master(comp, 'ledger', {'name': 'Cash', 'parent': 'Cash-in-hand', 'opening_balance': '10000.00', 'drcr': 'Dr'})
+    b.save_master(comp, 'ledger', {'name': 'Bank', 'parent': 'Bank Accounts', 'opening_balance': '50000.00', 'drcr': 'Dr'})
+
+    # Raw materials with godowns
+    b.save_master(comp, 'stock_item', {
+        'name': 'Steel Sheet', 'base_units': 'kg',
+        'opening_qty': '100', 'opening_rate': '100.00', 'godown': 'Warehouse North'
+    })
+    b.save_master(comp, 'stock_item', {
+        'name': 'Plastic Case', 'base_units': 'nos',
+        'opening_qty': '50', 'opening_rate': '20.00', 'godown': 'Warehouse South'
+    })
+
+    # Finished Good with BOM specifying component godowns
+    b.save_master(comp, 'stock_item', {
+        'name': 'Finished Machine', 'base_units': 'nos', 'godown': 'Assembly Plant',
+        'bom': {
+            'name': 'Machine Assembly BOM',
+            'unit_qty': 1,
+            'components': [
+                {'item': 'Steel Sheet', 'qty': 5, 'godown': 'Warehouse North'},
+                {'item': 'Plastic Case', 'qty': 2, 'godown': 'Warehouse South'}
+            ]
+        }
+    })
+
+    # Post manufacturing journal with multiple additional costs using different balancing ledgers:
+    # - Wages 300 from Cash
+    # - Electricity 500 from Bank
+    v_id = b.post_manufacturing_journal(
+        comp, 'Finished Machine', 2,
+        date='20260410', voucher_number='MFG-MULTI-01',
+        additional_costs=[
+            {'ledger': 'Wages', 'amount': '300.00', 'balancing_ledger': 'Cash'},
+            {'ledger': 'Electricity', 'amount': '500.00', 'balancing_ledger': 'Bank'}
+        ]
+    )
+    assert v_id is not None
+
+    c = b.get_company(comp)
+    vch = next(v for v in c['vouchers'] if str(v.get('MASTERID')) == str(v_id))
+
+    # Check consumption godowns
+    consump = vch['CONSUMPTIONENTRIES.LIST']
+    steel_entry = next(e for e in consump if e['STOCKITEMNAME'] == 'Steel Sheet')
+    plastic_entry = next(e for e in consump if e['STOCKITEMNAME'] == 'Plastic Case')
+    assert steel_entry['GODOWN'] == 'Warehouse North'
+    assert plastic_entry['GODOWN'] == 'Warehouse South'
+
+    # Check production godown
+    assert vch['PRODUCTIONENTRIES.LIST'][0]['GODOWN'] == 'Assembly Plant'
+
+    # Check additional ledger entries balance:
+    # Wages (+300), Cash (-300), Electricity (+500), Bank (-500) -> Net 0
+    ledger_entries = vch['ALLLEDGERENTRIES.LIST']
+    assert len(ledger_entries) == 4
+    net_ledger = sum((decimal(e['AMOUNT']) for e in ledger_entries), Decimal('0.00'))
+    assert net_ledger == Decimal('0.00')
+
+    # Total cost of 2 machines:
+    # Steel: 2 * 5 = 10 kg @ 100 = 1000.00
+    # Plastic: 2 * 2 = 4 nos @ 20 = 80.00
+    # Additional: 300 + 500 = 800.00
+    # Total = 1880.00 (940.00 per machine)
+    assert decimal(vch['PRODUCTIONENTRIES.LIST'][0]['AMOUNT']) == Decimal('1880.00')
+    assert decimal(vch['PRODUCTIONENTRIES.LIST'][0]['RATE']) == Decimal('940.00')
+
+
+def test_tally_category_allocations_and_bom_xml(tmp_path):
+    """Test Tally XML CATEGORYALLOCATIONS.LIST support and BOM XML serialization roundtrip."""
+    b = Books(tmp_path / "xml_roundtrip.sqlite3")
+    b.create_or_alter_company({
+        'name': 'XML Full Co',
+        'starting_from': '20260401',
+        'ending_at': '20270331',
+    })
+    comp = 'XML Full Co'
+
+    b.save_master(comp, 'unit', {'name': 'nos', 'factor': '1'})
+    b.save_master(comp, 'stock_item', {
+        'name': 'Bolt', 'base_units': 'nos', 'opening_qty': '100', 'opening_rate': '5.00'
+    })
+    b.save_master(comp, 'stock_item', {
+        'name': 'Wheel', 'base_units': 'nos', 'opening_qty': '0', 'opening_balance': '0.00',
+        'bom': {
+            'name': 'Wheel Assembly',
+            'unit_qty': 1,
+            'components': [{'item': 'Bolt', 'qty': 4}]
+        }
+    })
+    b.save_master(comp, 'ledger', {'name': 'Bank', 'parent': 'Bank Accounts', 'opening_balance': '10000.00', 'drcr': 'Dr'})
+    b.save_master(comp, 'ledger', {'name': 'Printing', 'parent': 'Indirect Expenses', 'opening_balance': '0.00'})
+
+    # Post voucher using nested CATEGORYALLOCATIONS.LIST (Tally XML standard format)
+    v_id = b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Payment',
+        'VOUCHERNUMBER': 'CAT-01',
+        'DATE': '20260408',
+        'ALLLEDGERENTRIES.LIST': [
+            {
+                'LEDGERNAME': 'Printing',
+                'AMOUNT': '500.00',
+                'ISDEEMEDPOSITIVE': 'Yes',
+                'CATEGORYALLOCATIONS.LIST': [
+                    {
+                        'CATEGORY': 'Branch Overhead',
+                        'COSTCENTREALLOCATIONS.LIST': [
+                            {'NAME': 'Kolkata Office', 'AMOUNT': '500.00'}
+                        ]
+                    }
+                ]
+            },
+            {'LEDGERNAME': 'Bank', 'AMOUNT': '-500.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+    assert v_id is not None
+
+    # Check that cost_centre_breakup and cost_category_summary recognize the nested allocation
+    breakup = b.cost_centre_breakup(comp, 'Kolkata Office')
+    assert breakup['total_debit'] == '500.00'
+
+    summary = b.cost_category_summary(comp)
+    assert len(summary['categories']) == 1
+    assert summary['categories'][0]['category'] == 'Branch Overhead'
+    assert summary['categories'][0]['cost_centres'][0]['name'] == 'Kolkata Office'
+
+    # Export XML and check BOM MULTICOMPONENTLIST is present
+    xml_data = export_xml(b.get_company(comp))
+    assert '<MULTICOMPONENTLIST.LIST>' in xml_data
+    assert '<STOCKITEMNAME>Bolt</STOCKITEMNAME>' in xml_data
+
+    # Import into fresh database and verify BOM was preserved
+    b2 = Books(tmp_path / "xml_import_roundtrip.sqlite3")
+    apply_import(b2, {'xml': xml_data, 'company': comp})
+    c2 = b2.get_company(comp)
+    assert 'Wheel' in c2['stock_items']
+    assert c2['stock_items']['Wheel']['bom']['components'][0]['item'] == 'Bolt'
+    assert c2['stock_items']['Wheel']['bom']['components'][0]['qty'] == 4.0
+
+
+def test_cancelled_voucher_bank_date_and_custom_vtype_paging(tmp_path):
+    """Test set_bank_date rejects cancelled vouchers and voucher_register matches custom types."""
+    b = Books(tmp_path / "vreg_custom.sqlite3")
+    b.create_or_alter_company({
+        'name': 'Custom VType Co',
+        'starting_from': '20260401',
+        'ending_at': '20270331',
+    })
+    comp = 'Custom VType Co'
+
+    b.save_master(comp, 'ledger', {'name': 'Bank A', 'parent': 'Bank Accounts', 'opening_balance': '10000.00', 'drcr': 'Dr'})
+    b.save_master(comp, 'ledger', {'name': 'Sales A', 'parent': 'Sales Accounts', 'opening_balance': '0.00'})
+    # Custom voucher type 'GST Invoice' whose parent is 'Sales'
+    b.save_master(comp, 'voucher_type', {'name': 'GST Invoice', 'parent': 'Sales', 'base_type': 'Sales'})
+
+    # Post 1 regular Sales voucher and 1 GST Invoice voucher
+    b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'Sales', 'VOUCHERNUMBER': 'S-1', 'DATE': '20260402',
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Bank A', 'AMOUNT': '1000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Sales A', 'AMOUNT': '-1000.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+    v2_id = b.post_voucher(comp, {
+        'VOUCHERTYPENAME': 'GST Invoice', 'VOUCHERNUMBER': 'GST-1', 'DATE': '20260404',
+        'ALLLEDGERENTRIES.LIST': [
+            {'LEDGERNAME': 'Bank A', 'AMOUNT': '2000.00', 'ISDEEMEDPOSITIVE': 'Yes'},
+            {'LEDGERNAME': 'Sales A', 'AMOUNT': '-2000.00', 'ISDEEMEDPOSITIVE': 'No'}
+        ]
+    })
+
+    # Filter voucher_register by 'Sales': should find BOTH S-1 and GST-1
+    reg = b.voucher_register(comp, voucher_type='Sales')
+    assert reg['total_count'] == 2
+
+    # Filter voucher_register by specific 'GST Invoice': should find only GST-1
+    reg_gst = b.voucher_register(comp, voucher_type='GST Invoice')
+    assert reg_gst['total_count'] == 1
+    assert reg_gst['items'][0]['voucher_number'] == 'GST-1'
+
+    # Cancel GST Invoice voucher
+    b.cancel_or_delete_voucher(comp, v2_id, delete=False)
+
+    # Attempt to set bank date on cancelled voucher -> must raise ValueError
+    with pytest.raises(ValueError, match="Cannot set bank date on cancelled"):
+        b.set_bank_date(comp, v2_id, 'Bank A', '20260405')
+

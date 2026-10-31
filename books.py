@@ -331,6 +331,27 @@ def _resolve_state(entity):
     gstin = str(entity.get('gstin') or '').strip()
     return gstin[:2].lower() if len(gstin) >= 2 and gstin[:2].isdigit() else ''
 
+def _tax_ledger_type(ledger_name):
+    name = str(ledger_name or '').strip().upper()
+    if 'CGST' in name or 'CENTRAL TAX' in name: return 'CGST'
+    if 'SGST' in name or 'UTGST' in name or 'STATE TAX' in name: return 'SGST'
+    if 'IGST' in name or 'INTEGRATED TAX' in name: return 'IGST'
+    if 'CESS' in name: return 'Cess'
+    return None
+
+def _get_cost_centre_allocations(entry):
+    allocs = []
+    for ca in entries(entry, 'COSTCENTREALLOCATIONS.LIST'):
+        allocs.append(ca)
+    for cat in entries(entry, 'CATEGORYALLOCATIONS.LIST'):
+        cat_name = cat.get('CATEGORY') or cat.get('COSTCATEGORYNAME') or 'Primary Cost Category'
+        for ca in entries(cat, 'COSTCENTREALLOCATIONS.LIST'):
+            ca_copy = dict(ca)
+            if not ca_copy.get('CATEGORY') and not ca_copy.get('COSTCATEGORYNAME'):
+                ca_copy['CATEGORY'] = cat_name
+            allocs.append(ca_copy)
+    return allocs
+
 def gst_components(company, taxable_amount, party_name=None, rate=None):
     """Calculate local CGST/SGST or interstate IGST for an invoice."""
     if not company.get('gstin'): return []
@@ -920,7 +941,13 @@ class Books:
                     merged['opening_balance']=str(abs(opening))
                     if 'credit_limit' in record:
                         cl = record.get('credit_limit')
-                        merged['credit_limit'] = str(decimal(cl, '0.01')) if cl not in (None, '') else ''
+                        if cl not in (None, ''):
+                            cl_dec = decimal(cl, '0.01')
+                            if cl_dec < Decimal('0'):
+                                raise ValueError('Credit limit cannot be negative')
+                            merged['credit_limit'] = str(cl_dec)
+                        else:
+                            merged['credit_limit'] = ''
                 else:
                     qty=record.get('opening_qty',record.get('closing_qty',previous.get('opening_qty',0)))
                     explicit_value=record.get('opening_balance',record.get('closing_balance'))
@@ -942,19 +969,26 @@ class Books:
                     if 'standard_selling_rate' in record:
                         ss_rate = record.get('standard_selling_rate')
                         merged['standard_selling_rate'] = str(decimal(ss_rate, '0.01')) if ss_rate not in (None, '') else ''
+                    def _chk_bom(bom_dict):
+                        if not isinstance(bom_dict, dict): raise ValueError('BOM must be a dictionary')
+                        if decimal(bom_dict.get('unit_qty', 1)) <= 0: raise ValueError('BOM unit quantity must be positive')
+                        comps = bom_dict.get('components', [])
+                        if not isinstance(comps, list): raise ValueError('BOM components must be a list')
+                        for comp in comps:
+                            if not comp.get('item'): raise ValueError('BOM component item is required')
+                            if decimal(comp.get('qty', 0)) <= 0: raise ValueError('BOM component quantity must be positive')
                     if 'bom' in record:
                         bom = record['bom']
                         if bom:
-                            if not isinstance(bom, dict): raise ValueError('BOM must be a dictionary')
-                            if decimal(bom.get('unit_qty', 1)) <= 0: raise ValueError('BOM unit quantity must be positive')
-                            comps = bom.get('components', [])
-                            if not isinstance(comps, list): raise ValueError('BOM components must be a list')
-                            for comp in comps:
-                                if not comp.get('item'): raise ValueError('BOM component item is required')
-                                if decimal(comp.get('qty', 0)) <= 0: raise ValueError('BOM component quantity must be positive')
+                            _chk_bom(bom)
                         merged['bom'] = bom
                     if 'boms' in record:
-                        merged['boms'] = record['boms']
+                        boms = record['boms']
+                        if boms:
+                            if not isinstance(boms, list): raise ValueError('BOMs must be a list')
+                            for b_item in boms:
+                                _chk_bom(b_item)
+                        merged['boms'] = boms
                     if 'hsn_code' in record:
                         merged['hsn_code'] = str(record['hsn_code'] or '').strip()
                     elif 'hsn' in record:
@@ -1072,7 +1106,7 @@ class Books:
         for entry in entries(v):
             if entry.get('LEDGERNAME') not in c['ledgers']: raise ValueError('Unknown ledger: '+str(entry.get('LEDGERNAME')))
             amounts.append(entry_debit(entry))
-            cc_allocs = entries(entry, 'COSTCENTREALLOCATIONS.LIST')
+            cc_allocs = _get_cost_centre_allocations(entry)
             if cc_allocs:
                 for ca in cc_allocs:
                     cc_name = ca.get('NAME') or ca.get('COSTCENTRENAME')
@@ -1123,17 +1157,25 @@ class Books:
                     raise ValueError(f"Period is locked until {lock_key}. Cannot record voucher dated {date_key(v.get('DATE'))}.")
                 if old and date_key(old.get('DATE')) <= lock_key:
                     raise ValueError(f"Period is locked until {lock_key}. Cannot alter voucher dated on or before lock date.")
-            party_name = v.get('PARTYLEDGERNAME')
-            if party_name and party_name in c.get('ledgers', {}):
-                p_ledger = c['ledgers'][party_name]
-                cl_str = p_ledger.get('credit_limit')
-                if cl_str and decimal(cl_str) > Decimal('0') and not v.get('override_credit_limit'):
-                    if _party_classification(c, party_name) == 'debtor':
-                        curr_bal = self.party_balance(c, party_name, exclude_voucher_id=old.get('MASTERID') if old else None)
-                        v_debit = sum((entry_debit(e) for e in entries(v) if e.get('LEDGERNAME') == party_name and entry_debit(e) > 0), Decimal('0.00'))
-                        limit_val = decimal(cl_str)
-                        if curr_bal + v_debit > limit_val:
-                            raise ValueError(f"Credit limit of {limit_val:.2f} exceeded for {party_name}. Projected balance: {(curr_bal + v_debit):.2f}")
+            party_names_to_check = set()
+            if v.get('PARTYLEDGERNAME'):
+                party_names_to_check.add(v['PARTYLEDGERNAME'])
+            for e in entries(v):
+                if entry_debit(e) > 0 and e.get('LEDGERNAME'):
+                    party_names_to_check.add(e['LEDGERNAME'])
+            if not v.get('override_credit_limit'):
+                for p_name in party_names_to_check:
+                    if p_name in c.get('ledgers', {}):
+                        p_ledger = c['ledgers'][p_name]
+                        cl_str = p_ledger.get('credit_limit')
+                        if cl_str and decimal(cl_str) > Decimal('0'):
+                            if _party_classification(c, p_name) == 'debtor':
+                                old_id = (old.get('MASTERID') if old else None) or (old.get('GUID') if old else None)
+                                curr_bal = self.party_balance(c, p_name, exclude_voucher_id=old_id)
+                                v_debit = sum((entry_debit(e) for e in entries(v) if e.get('LEDGERNAME') == p_name and entry_debit(e) > 0), Decimal('0.00'))
+                                limit_val = decimal(cl_str)
+                                if curr_bal + v_debit > limit_val:
+                                    raise ValueError(f"Credit limit of {limit_val:.2f} exceeded for {p_name}. Projected balance: {(curr_bal + v_debit):.2f}")
             if 'BILLING_ROWS' in v:
                 billing_rows=self.validate_billing_rows(company, v.get('VOUCHERTYPENAME'),
                     v.get('BILLING_ROWS'), v.get('BILLING_CLIENT_AMOUNTS'))
@@ -1734,7 +1776,7 @@ class Books:
         bal = decimal(ledger.get('signed_opening', 0), '0.01')
         for v in c.get('vouchers', []):
             if not effective(v): continue
-            if exclude_voucher_id and str(v.get('MASTERID')) == str(exclude_voucher_id): continue
+            if exclude_voucher_id and (str(v.get('MASTERID')) == str(exclude_voucher_id) or str(v.get('GUID')) == str(exclude_voucher_id)): continue
             if as_of and date_key(v.get('DATE')) > date_key(as_of): continue
             base = c.get('voucher_type_records', {}).get(v['VOUCHERTYPENAME'], {}).get('base_type', v['VOUCHERTYPENAME'])
             if base not in NON_ACCOUNTING or (base == 'Manufacturing Journal' and entries(v)):
@@ -1786,6 +1828,8 @@ class Books:
             vch = next((v for v in c.get('vouchers', []) if ident in (str(v.get('MASTERID')), str(v.get('GUID')), str(v.get('VOUCHERNUMBER')))), None)
             if not vch:
                 raise ValueError(f"Voucher not found: {voucher_identity}")
+            if not effective(vch):
+                raise ValueError(f"Cannot set bank date on cancelled or optional voucher: {voucher_identity}")
             found = False
             for entry in entries(vch):
                 if entry.get('LEDGERNAME') == ledger_name:
@@ -1885,7 +1929,7 @@ class Books:
                 if v_date < start or v_date > end: continue
 
                 for entry in entries(v):
-                    for ca in entries(entry, 'COSTCENTREALLOCATIONS.LIST'):
+                    for ca in _get_cost_centre_allocations(entry):
                         ca_name = ca.get('NAME') or ca.get('COSTCENTRENAME')
                         if ca_name == cost_centre_name:
                             amt = abs(decimal(ca.get('AMOUNT', 0), '0.01'))
@@ -1931,7 +1975,7 @@ class Books:
                 if v_date < start or v_date > end: continue
 
                 for entry in entries(v):
-                    for ca in entries(entry, 'COSTCENTREALLOCATIONS.LIST'):
+                    for ca in _get_cost_centre_allocations(entry):
                         cc_name = ca.get('NAME') or ca.get('COSTCENTRENAME')
                         cat = (ca.get('CATEGORY') or ca.get('COSTCATEGORYNAME') or
                                c.get('cost_centre_records', {}).get(cc_name, {}).get('category') or 'Primary Cost Category')
@@ -2010,7 +2054,7 @@ class Books:
                     raise ValueError(f"Unknown component stock item: {c_name}")
                 c_record = c['stock_items'][c_name]
                 c_qty = decimal(comp['qty']) * ratio
-                c_rate = decimal(c_record.get('closing_rate') or c_record.get('opening_rate') or 0)
+                c_rate = decimal(c_record.get('closing_rate') or c_record.get('opening_rate') or c_record.get('standard_purchase_rate') or comp.get('rate') or 0)
                 c_amt = (c_qty * c_rate).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
                 total_raw_material_cost += c_amt
                 entry_dict = {
@@ -2021,8 +2065,9 @@ class Books:
                     'AMOUNT': str(c_amt),
                     'ISDEEMEDPOSITIVE': 'No'
                 }
-                if godown or c_record.get('godown'):
-                    entry_dict['GODOWN'] = godown or c_record.get('godown', 'Main Location')
+                c_godown = comp.get('godown') or godown or c_record.get('godown')
+                if c_godown:
+                    entry_dict['GODOWN'] = c_godown
                 consumption_entries.append(entry_dict)
 
             total_additional_cost = Decimal('0.00')
@@ -2038,16 +2083,14 @@ class Books:
                             'AMOUNT': str(amt),
                             'ISDEEMEDPOSITIVE': 'Yes'
                         })
-                if total_additional_cost > Decimal('0'):
-                    balancing_ledger = (additional_costs[0].get('balancing_ledger')
-                                        if isinstance(additional_costs[0], dict) else None) or 'Bank'
-                    if balancing_ledger not in c.get('ledgers', {}):
-                        balancing_ledger = 'Cash' if 'Cash' in c.get('ledgers', {}) else next(iter(c.get('ledgers', {})), 'Suspense A/c')
-                    additional_ledger_entries.append({
-                        'LEDGERNAME': balancing_ledger,
-                        'AMOUNT': str(-total_additional_cost),
-                        'ISDEEMEDPOSITIVE': 'No'
-                    })
+                        balancing_ledger = ac.get('balancing_ledger') or 'Bank'
+                        if balancing_ledger not in c.get('ledgers', {}):
+                            balancing_ledger = 'Cash' if 'Cash' in c.get('ledgers', {}) else next(iter(c.get('ledgers', {})), 'Suspense A/c')
+                        additional_ledger_entries.append({
+                            'LEDGERNAME': balancing_ledger,
+                            'AMOUNT': str(-amt),
+                            'ISDEEMEDPOSITIVE': 'No'
+                        })
 
             total_fg_cost = total_raw_material_cost + total_additional_cost
             fg_rate = (total_fg_cost / qty_produced).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
@@ -2103,7 +2146,7 @@ class Books:
             return False
         salt = c.get('pin_salt', '')
         h = hashlib.pbkdf2_hmac('sha256', str(pin).strip().encode('utf-8'), salt.encode('utf-8'), 100000).hex()
-        return h == c['pin_hash']
+        return secrets.compare_digest(h, c['pin_hash'])
 
     def is_company_locked(self, company):
         if not company or company not in self.data.get('companies', {}):
@@ -2116,7 +2159,12 @@ class Books:
             c = self.get_company(company)
             vouchers = [v for v in c.get('vouchers', []) if effective(v)]
             if voucher_type:
-                vouchers = [v for v in vouchers if v.get('VOUCHERTYPENAME') == voucher_type]
+                def matches_vtype(v):
+                    vt = v.get('VOUCHERTYPENAME')
+                    if vt == voucher_type: return True
+                    base = c.get('voucher_type_records', {}).get(vt, {}).get('base_type', vt)
+                    return base == voucher_type
+                vouchers = [v for v in vouchers if matches_vtype(v)]
             if from_date:
                 start = date_key(from_date)
                 vouchers = [v for v in vouchers if date_key(v.get('DATE')) >= start]
@@ -2141,7 +2189,16 @@ class Books:
                 if party:
                     pe = next((e for e in entries(v) if e.get('LEDGERNAME') == party), None)
                     if pe: return abs(decimal(pe.get('AMOUNT', 0), '0.01'))
-                return sum((abs(decimal(e.get('AMOUNT', 0), '0.01')) for e in entries(v) if entry_debit(e) > 0), Decimal('0.00'))
+                ledger_amt = sum((abs(decimal(e.get('AMOUNT', 0), '0.01')) for e in entries(v) if entry_debit(e) > 0), Decimal('0.00'))
+                if ledger_amt > Decimal('0.00'):
+                    return ledger_amt
+                prod = entries(v, 'PRODUCTIONENTRIES.LIST') or entries(v, 'INWARDINVENTORYENTRIES.LIST')
+                if prod:
+                    return sum((abs(decimal(p.get('AMOUNT', 0), '0.01')) for p in prod), Decimal('0.00'))
+                inv = entries(v, 'ALLINVENTORYENTRIES.LIST') or entries(v, 'INVENTORYENTRIES.LIST')
+                if inv:
+                    return sum((abs(decimal(i.get('AMOUNT', 0), '0.01')) for i in inv), Decimal('0.00'))
+                return Decimal('0.00')
 
             reverse = (str(sort_order).lower() == 'desc')
             if sort_by == 'amount':
@@ -2149,7 +2206,11 @@ class Books:
             elif sort_by == 'number':
                 vouchers.sort(key=lambda v: str(v.get('VOUCHERNUMBER', '')), reverse=reverse)
             else:
-                vouchers.sort(key=lambda v: (v.get('DATE', ''), str(v.get('MASTERID', ''))), reverse=reverse)
+                def sort_key(v):
+                    mid = v.get('MASTERID')
+                    mid_num = int(mid) if str(mid).isdigit() else 0
+                    return (v.get('DATE', ''), mid_num)
+                vouchers.sort(key=sort_key, reverse=reverse)
 
             total_count = len(vouchers)
             page_size = max(1, int(page_size))
@@ -2195,6 +2256,8 @@ class Books:
             b2b_by_ctin = {}
             b2cl_by_pos = {}
             b2cs_by_key = {}
+            cdnr_by_ctin = {}
+            cdnur_by_pos = {}
             hsn_by_code = {}
 
             total_taxable = Decimal('0.00')
@@ -2211,7 +2274,11 @@ class Books:
                 if v_date < start or v_date > end: continue
                 vtype = v.get('VOUCHERTYPENAME', '')
                 base = c.get('voucher_type_records', {}).get(vtype, {}).get('base_type', vtype)
-                if base not in ('Sales', 'Credit Note'): continue
+                if base not in ('Sales', 'Credit Note', 'Debit Note'): continue
+
+                is_credit_note = (base == 'Credit Note')
+                is_debit_note = (base == 'Debit Note')
+                multiplier = Decimal('-1') if is_credit_note else Decimal('1')
 
                 party_name = v.get('PARTYLEDGERNAME', '')
                 party = c.get('ledgers', {}).get(party_name, {})
@@ -2260,10 +2327,13 @@ class Books:
                             'qty': qty
                         })
                 else:
-                    tax_entries = {e.get('LEDGERNAME'): abs(decimal(e.get('AMOUNT', 0), '0.01'))
-                                   for e in entries(v) if e.get('LEDGERNAME') in ('CGST', 'SGST', 'IGST', 'Cess')}
+                    tax_entries = {}
+                    for e in entries(v):
+                        t_type = _tax_ledger_type(e.get('LEDGERNAME'))
+                        if t_type:
+                            tax_entries[t_type] = tax_entries.get(t_type, Decimal('0.00')) + abs(decimal(e.get('AMOUNT', 0), '0.01'))
                     taxable_entries = [abs(decimal(e.get('AMOUNT', 0), '0.01'))
-                                       for e in entries(v) if e.get('LEDGERNAME') not in ('CGST', 'SGST', 'IGST', 'Cess', party_name)]
+                                       for e in entries(v) if not _tax_ledger_type(e.get('LEDGERNAME')) and e.get('LEDGERNAME') != party_name]
                     amt = sum(taxable_entries, Decimal('0.00'))
                     cgst = tax_entries.get('CGST', Decimal('0.00'))
                     sgst = tax_entries.get('SGST', Decimal('0.00'))
@@ -2293,13 +2363,13 @@ class Books:
                     inv_val = sum((d['txval'] + d['iamt'] + d['camt'] + d['samt'] + d['csamt'] for d in items_det), Decimal('0.00'))
 
                 inv_count += 1
-                total_inv_val += inv_val
+                total_inv_val += multiplier * inv_val
                 for d in items_det:
-                    total_taxable += d['txval']
-                    total_igst += d['iamt']
-                    total_cgst += d['camt']
-                    total_sgst += d['samt']
-                    total_cess += d['csamt']
+                    total_taxable += multiplier * d['txval']
+                    total_igst += multiplier * d['iamt']
+                    total_cgst += multiplier * d['camt']
+                    total_sgst += multiplier * d['samt']
+                    total_cess += multiplier * d['csamt']
 
                     hsn_key = (d['hsn_sc'], d['uqc'])
                     hsn_rec = hsn_by_code.setdefault(hsn_key, {
@@ -2307,14 +2377,14 @@ class Books:
                         'qty': Decimal('0'), 'val': Decimal('0.00'), 'txval': Decimal('0.00'),
                         'iamt': Decimal('0.00'), 'camt': Decimal('0.00'), 'samt': Decimal('0.00'), 'csamt': Decimal('0.00')
                     })
-                    hsn_rec['qty'] += d['qty']
+                    hsn_rec['qty'] += multiplier * d['qty']
                     line_val = d['txval'] + d['iamt'] + d['camt'] + d['samt'] + d['csamt']
-                    hsn_rec['val'] += line_val
-                    hsn_rec['txval'] += d['txval']
-                    hsn_rec['iamt'] += d['iamt']
-                    hsn_rec['camt'] += d['camt']
-                    hsn_rec['samt'] += d['samt']
-                    hsn_rec['csamt'] += d['csamt']
+                    hsn_rec['val'] += multiplier * line_val
+                    hsn_rec['txval'] += multiplier * d['txval']
+                    hsn_rec['iamt'] += multiplier * d['iamt']
+                    hsn_rec['camt'] += multiplier * d['camt']
+                    hsn_rec['samt'] += multiplier * d['samt']
+                    hsn_rec['csamt'] += multiplier * d['csamt']
 
                 formatted_itms = [{
                     'num': d['num'],
@@ -2330,33 +2400,66 @@ class Books:
 
                 is_registered = bool(recipient_gstin)
                 if is_registered:
-                    inv_data = {
-                        'inum': v.get('VOUCHERNUMBER', ''),
-                        'idt': v_date,
-                        'val': float(inv_val),
-                        'pos': pos,
-                        'rchrg': 'N',
-                        'inv_typ': 'R',
-                        'itms': formatted_itms
-                    }
-                    b2b_group = b2b_by_ctin.setdefault(recipient_gstin, {
-                        'ctin': recipient_gstin,
-                        'cpty_name': party_name,
-                        'inv': []
-                    })
-                    b2b_group['inv'].append(inv_data)
+                    if not is_credit_note and not is_debit_note:
+                        inv_data = {
+                            'inum': v.get('VOUCHERNUMBER', ''),
+                            'idt': v_date,
+                            'val': float(inv_val),
+                            'pos': pos,
+                            'rchrg': 'N',
+                            'inv_typ': 'R',
+                            'itms': formatted_itms
+                        }
+                        b2b_group = b2b_by_ctin.setdefault(recipient_gstin, {
+                            'ctin': recipient_gstin,
+                            'cpty_name': party_name,
+                            'inv': []
+                        })
+                        b2b_group['inv'].append(inv_data)
+                    else:
+                        nt_data = {
+                            'ntty': 'C' if is_credit_note else 'D',
+                            'nt_num': v.get('VOUCHERNUMBER', ''),
+                            'nt_dt': v_date,
+                            'val': float(inv_val),
+                            'pos': pos,
+                            'rchrg': 'N',
+                            'itms': formatted_itms
+                        }
+                        cdnr_group = cdnr_by_ctin.setdefault(recipient_gstin, {
+                            'ctin': recipient_gstin,
+                            'cpty_name': party_name,
+                            'nt': []
+                        })
+                        cdnr_group['nt'].append(nt_data)
                 elif is_interstate and inv_val > Decimal('250000.00'):
-                    inv_data = {
-                        'inum': v.get('VOUCHERNUMBER', ''),
-                        'idt': v_date,
-                        'val': float(inv_val),
-                        'itms': formatted_itms
-                    }
-                    b2cl_group = b2cl_by_pos.setdefault(pos, {
-                        'pos': pos,
-                        'inv': []
-                    })
-                    b2cl_group['inv'].append(inv_data)
+                    if not is_credit_note and not is_debit_note:
+                        inv_data = {
+                            'inum': v.get('VOUCHERNUMBER', ''),
+                            'idt': v_date,
+                            'val': float(inv_val),
+                            'itms': formatted_itms
+                        }
+                        b2cl_group = b2cl_by_pos.setdefault(pos, {
+                            'pos': pos,
+                            'inv': []
+                        })
+                        b2cl_group['inv'].append(inv_data)
+                    else:
+                        nt_data = {
+                            'typ': 'B2CL',
+                            'ntty': 'C' if is_credit_note else 'D',
+                            'nt_num': v.get('VOUCHERNUMBER', ''),
+                            'nt_dt': v_date,
+                            'val': float(inv_val),
+                            'pos': pos,
+                            'itms': formatted_itms
+                        }
+                        cdnur_group = cdnur_by_pos.setdefault(pos, {
+                            'pos': pos,
+                            'nt': []
+                        })
+                        cdnur_group['nt'].append(nt_data)
                 else:
                     sply_ty = 'INTER' if is_interstate else 'INTRA'
                     for d in items_det:
@@ -2372,11 +2475,11 @@ class Books:
                             'samt': Decimal('0.00'),
                             'csamt': Decimal('0.00')
                         })
-                        b2cs_group['txval'] += d['txval']
-                        b2cs_group['iamt'] += d['iamt']
-                        b2cs_group['camt'] += d['camt']
-                        b2cs_group['samt'] += d['samt']
-                        b2cs_group['csamt'] += d['csamt']
+                        b2cs_group['txval'] += multiplier * d['txval']
+                        b2cs_group['iamt'] += multiplier * d['iamt']
+                        b2cs_group['camt'] += multiplier * d['camt']
+                        b2cs_group['samt'] += multiplier * d['samt']
+                        b2cs_group['csamt'] += multiplier * d['csamt']
 
             b2cs_list = []
             for item in b2cs_by_key.values():
@@ -2393,8 +2496,9 @@ class Books:
                 })
 
             hsn_list = []
-            for item in hsn_by_code.values():
+            for idx, item in enumerate(hsn_by_code.values(), 1):
                 hsn_list.append({
+                    'num': idx,
                     'hsn_sc': item['hsn_sc'],
                     'desc': item['desc'],
                     'uqc': item['uqc'],
@@ -2415,6 +2519,8 @@ class Books:
                 'b2b': list(b2b_by_ctin.values()),
                 'b2cl': list(b2cl_by_pos.values()),
                 'b2cs': b2cs_list,
+                'cdnr': list(cdnr_by_ctin.values()),
+                'cdnur': list(cdnur_by_pos.values()),
                 'hsn': {'data': hsn_list},
                 'summary': {
                     'invoice_count': inv_count,
@@ -2440,6 +2546,8 @@ class Books:
             'b2b': report['b2b'],
             'b2cl': report['b2cl'],
             'b2cs': report['b2cs'],
+            'cdnr': report.get('cdnr', []),
+            'cdnur': report.get('cdnur', []),
             'hsn': report['hsn']
         }
 
@@ -2466,8 +2574,8 @@ class Books:
                 vtype = v.get('VOUCHERTYPENAME', '')
                 base = c.get('voucher_type_records', {}).get(vtype, {}).get('base_type', vtype)
 
-                if base in ('Sales', 'Credit Note'):
-                    multiplier = Decimal('1') if base == 'Sales' else Decimal('-1')
+                if base in ('Sales', 'Credit Note', 'Debit Note'):
+                    multiplier = Decimal('-1') if base == 'Credit Note' else Decimal('1')
                     party_name = v.get('PARTYLEDGERNAME', '')
                     party = c.get('ledgers', {}).get(party_name, {})
                     party_st = _resolve_state(party)
@@ -2495,10 +2603,14 @@ class Books:
                                 else:
                                     t31_a['iamt'] += tax
                     else:
-                        tax_entries = {e.get('LEDGERNAME'): abs(decimal(e.get('AMOUNT', 0), '0.01')) * multiplier
-                                       for e in entries(v) if e.get('LEDGERNAME') in ('CGST', 'SGST', 'IGST', 'Cess')}
-                        amt = sum((abs(decimal(e.get('AMOUNT', 0), '0.01')) * multiplier
-                                   for e in entries(v) if e.get('LEDGERNAME') not in ('CGST', 'SGST', 'IGST', 'Cess', party_name)), Decimal('0.00'))
+                        tax_entries = {}
+                        for e in entries(v):
+                            t_type = _tax_ledger_type(e.get('LEDGERNAME'))
+                            if t_type:
+                                tax_entries[t_type] = tax_entries.get(t_type, Decimal('0.00')) + abs(decimal(e.get('AMOUNT', 0), '0.01')) * multiplier
+                        taxable_entries = [abs(decimal(e.get('AMOUNT', 0), '0.01')) * multiplier
+                                           for e in entries(v) if not _tax_ledger_type(e.get('LEDGERNAME')) and e.get('LEDGERNAME') != party_name]
+                        amt = sum(taxable_entries, Decimal('0.00'))
                         cgst = tax_entries.get('CGST', Decimal('0.00'))
                         sgst = tax_entries.get('SGST', Decimal('0.00'))
                         igst = tax_entries.get('IGST', Decimal('0.00'))
@@ -2512,7 +2624,7 @@ class Books:
                             t31_a['iamt'] += igst
                             t31_a['csamt'] += cess
 
-                elif base in ('Purchase', 'Debit Note'):
+                elif base in ('Purchase', 'Debit Note', 'Credit Note'):
                     is_return = (base == 'Debit Note')
                     target_itc = itc_reversed if is_return else itc_available
                     party_name = v.get('PARTYLEDGERNAME', '')
@@ -2538,8 +2650,11 @@ class Books:
                                 else:
                                     target_itc['iamt'] += tax
                     else:
-                        tax_entries = {e.get('LEDGERNAME'): abs(decimal(e.get('AMOUNT', 0), '0.01'))
-                                       for e in entries(v) if e.get('LEDGERNAME') in ('CGST', 'SGST', 'IGST', 'Cess')}
+                        tax_entries = {}
+                        for e in entries(v):
+                            t_type = _tax_ledger_type(e.get('LEDGERNAME'))
+                            if t_type:
+                                tax_entries[t_type] = tax_entries.get(t_type, Decimal('0.00')) + abs(decimal(e.get('AMOUNT', 0), '0.01'))
                         target_itc['camt'] += tax_entries.get('CGST', Decimal('0.00'))
                         target_itc['samt'] += tax_entries.get('SGST', Decimal('0.00'))
                         target_itc['iamt'] += tax_entries.get('IGST', Decimal('0.00'))

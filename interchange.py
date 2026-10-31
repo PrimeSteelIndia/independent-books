@@ -340,6 +340,19 @@ def _candidate(books,payload):
                             value=_findtext(node,tag,'')
                             if key=='base_units' and value.strip() in ('Not Applicable', 'None', ''): value = ''
                             record[key]=str(decimal(value.split('/')[0])) if tag.startswith('OPENING') else value
+                    bom_node = node.find('MULTICOMPONENTLIST.LIST')
+                    if bom_node is not None:
+                        bom_name = _findtext(bom_node, 'NAME', 'Standard BOM')
+                        unit_qty = decimal(_findtext(bom_node, 'UNITQTY', '1') or '1')
+                        comps = []
+                        for comp_node in _findall(bom_node, 'COMPONENTLIST.LIST'):
+                            c_item = _findtext(comp_node, 'STOCKITEMNAME', '')
+                            c_qty_str = _findtext(comp_node, 'ACTUALQTY', '0').split()[0] or '0'
+                            c_qty = decimal(c_qty_str)
+                            if c_item and c_qty > 0:
+                                comps.append({'item': c_item, 'qty': float(c_qty)})
+                        if comps:
+                            record['bom'] = {'name': bom_name, 'unit_qty': float(unit_qty), 'components': comps}
                 elif kind=='unit':
                     for tag,key in (('UNITTYPE','type'),('BASEUNIT','base_unit'),('UNITFACTOR','factor'),('DECIMALPLACES','decimal_places')):
                         if _findall(node,tag):
@@ -435,6 +448,16 @@ def export_xml(company):
             if kind=='stock_item': mapped['CATEGORY']=record.get('category','Primary')
             if kind=='stock_item' and (record.get('hsn_code') or record.get('hsn')): mapped['HSNCODE']=str(record.get('hsn_code') or record.get('hsn'))
             if kind=='stock_item' and record.get('description'): mapped['DESCRIPTION']=str(record['description'])
+            if kind=='stock_item' and record.get('bom'):
+                bom = record['bom']
+                if element.find('MULTICOMPONENTLIST.LIST') is None and isinstance(bom, dict):
+                    bom_elem = ET.SubElement(element, 'MULTICOMPONENTLIST.LIST')
+                    ET.SubElement(bom_elem, 'NAME').text = str(bom.get('name') or 'Standard BOM')
+                    ET.SubElement(bom_elem, 'UNITQTY').text = str(bom.get('unit_qty', 1))
+                    for comp in bom.get('components', []):
+                        comp_elem = ET.SubElement(bom_elem, 'COMPONENTLIST.LIST')
+                        ET.SubElement(comp_elem, 'STOCKITEMNAME').text = str(comp.get('item', ''))
+                        ET.SubElement(comp_elem, 'ACTUALQTY').text = str(comp.get('qty', 0))
             if kind=='unit': mapped.update(UNITTYPE=record.get('type','quantity'),BASEUNIT=record.get('base_unit',name),UNITFACTOR=str(record.get('factor','1')),DECIMALPLACES=str(record.get('decimal_places','')))
             for key,value in mapped.items():
                 node=element.find(key)
