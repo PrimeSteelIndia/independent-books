@@ -100,6 +100,11 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                     return self.send({'error': 'Invalid local host'}, 403)
                 parsed=urlparse(self.path);query={k:v[0] for k,v in parse_qs(parsed.query).items()}
                 with db.lock:
+                    target_comp = query.get('company') or (db.get_active_company_name() if parsed.path.startswith('/api/') else None)
+                    if target_comp and db.is_company_locked(target_comp) and parsed.path.startswith('/api/') and parsed.path not in ('/api/status', '/api/check_update', '/api/is_company_locked'):
+                        pin = self.headers.get('X-Company-PIN') or query.get('pin')
+                        if not db.verify_company_pin(target_comp, pin):
+                            return self.send({'status': 'error', 'error': 'Company PIN required or incorrect', 'is_locked': True}, 401)
                     if parsed.path=='/api/data': return self.send(data_view(db,query.get('company'),query.get('from'),query.get('to')))
                     if parsed.path=='/api/status': return self.send({'status':'online','independent':True,'companies':len(db.data['companies']),'application_root':str(ROOT.resolve()),'data_path':str(path)})
                     if parsed.path=='/api/check_update':
@@ -111,6 +116,10 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                             'changelog': 'Independent Books is up-to-date (v1.0.0, air-gapped local build).',
                             'release_url': 'https://github.com/zoro-roronoa74/independent-books/releases'
                         })
+                    if parsed.path=='/api/is_company_locked':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send({'status':'success','is_locked':db.is_company_locked(company)})
                     if parsed.path=='/api/last_narration':
                         company=query.get('company')
                         voucher_type=query.get('voucher_type')
@@ -146,6 +155,44 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                         date=query.get('date')
                         metrics=db.get_dashboard_metrics(company, date=date)
                         return self.send({'status':'ok','metrics':metrics})
+                    if parsed.path=='/api/gstr1':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send({'status':'success','report':db.gstr1_report(company, query.get('from'), query.get('to'))})
+                    if parsed.path=='/api/gstr1_export':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send(db.gstr1_export(company, query.get('from'), query.get('to')))
+                    if parsed.path=='/api/gstr3b':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send({'status':'success','report':db.gstr3b_report(company, query.get('from'), query.get('to'))})
+                    if parsed.path=='/api/bank_reconciliation':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        ledger=query.get('ledger') or query.get('bank_ledger')
+                        if not ledger: raise ValueError('Bank ledger is required')
+                        return self.send({'status':'success','statement':db.bank_reconciliation_statement(company, ledger, query.get('as_of'))})
+                    if parsed.path=='/api/cost_centre_breakup':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        cost_centre=query.get('cost_centre') or query.get('name')
+                        if not cost_centre: raise ValueError('Cost centre is required')
+                        return self.send({'status':'success','report':db.cost_centre_breakup(company, cost_centre, query.get('from'), query.get('to'))})
+                    if parsed.path=='/api/cost_category_summary':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send({'status':'success','report':db.cost_category_summary(company, query.get('category'), query.get('from'), query.get('to'))})
+                    if parsed.path=='/api/voucher_register':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        return self.send({'status':'success','register':db.voucher_register(company, query.get('type') or query.get('voucher_type'), query.get('from'), query.get('to'), query.get('search'), int(query.get('page', 1)), int(query.get('page_size', 50)), query.get('sort_by', 'date'), query.get('sort_order', 'desc'))})
+                    if parsed.path=='/api/check_credit_limit':
+                        company=query.get('company') or db.get_active_company_name()
+                        if not company: raise ValueError('Company is required')
+                        party=query.get('party')
+                        if not party: raise ValueError('Party is required')
+                        return self.send({'status':'success','credit_check':db.check_credit_limit(company, party, decimal(query.get('amount', 0)))})
                     if parsed.path=='/api/billing_profiles':
                         company=query.get('company') or db.get_active_company_name()
                         if not company: raise ValueError('Company is required')
@@ -203,6 +250,11 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                     self.send({'status':'success'})
                     threading.Thread(target=self.server.shutdown,daemon=True).start()
                     return
+                target_comp = company or db.get_active_company_name()
+                if target_comp and db.is_company_locked(target_comp) and path not in ('/api/verify_company_pin', '/api/shutdown'):
+                    pin = self.headers.get('X-Company-PIN') or payload.get('pin') or payload.get('old_pin')
+                    if not db.verify_company_pin(target_comp, pin):
+                        return self.send({'status': 'error', 'error': 'Company PIN required or incorrect', 'is_locked': True}, 401)
                 if path=='/api/save_company':
                     if payload.get('operation')=='Create' and payload['company_meta'].get('name') in db.data['companies']: raise ValueError('Company name already exists')
                     db.create_or_alter_company(payload['company_meta']);result={}
@@ -219,6 +271,8 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                 elif path in ('/api/create_voucher','/api/alter_voucher'):
                     if not company: raise ValueError('Explicit company is required')
                     v=payload['voucher'];v['@ACTION']='Alter' if path.endswith('alter_voucher') else 'Create'
+                    if payload.get('override_credit_limit'):
+                        v['override_credit_limit'] = True
                     result={'voucher_id':db.post_voucher(
                         company, v, payload.get('expected_revision'),
                         payload.get('allow_inventory_warning', False), payload.get('warning_token'))}
@@ -255,6 +309,29 @@ def make_server(port=3543,data_path=None,allow_lan=False):
                 elif path=='/api/bulk_update_rates':
                     if not company: raise ValueError('Explicit company is required')
                     result={'updated':db.bulk_update_item_rates(company,payload.get('items',[]))}
+                elif path=='/api/set_company_pin':
+                    if not company: raise ValueError('Explicit company is required')
+                    result={'updated':db.set_company_pin(company, payload.get('new_pin'), payload.get('old_pin'))}
+                elif path=='/api/verify_company_pin':
+                    target_c = company or db.get_active_company_name()
+                    if not target_c: raise ValueError('Company is required')
+                    result={'valid':db.verify_company_pin(target_c, payload.get('pin'))}
+                elif path=='/api/set_period_lock':
+                    if not company: raise ValueError('Explicit company is required')
+                    result={'lock_date':db.set_period_lock(company, payload.get('lock_date'))}
+                elif path=='/api/set_bank_date':
+                    if not company: raise ValueError('Explicit company is required')
+                    v_id = payload.get('voucher_id') or payload.get('voucher_identity')
+                    ledger = payload.get('ledger') or payload.get('ledger_name')
+                    if not v_id or not ledger: raise ValueError('voucher_id and ledger are required')
+                    result={'updated':db.set_bank_date(company, v_id, ledger, payload.get('bank_date'))}
+                elif path=='/api/post_manufacturing':
+                    if not company: raise ValueError('Explicit company is required')
+                    result={'voucher_id':db.post_manufacturing_journal(
+                        company, payload.get('fg_item'), payload.get('fg_qty'),
+                        date=payload.get('date'), voucher_number=payload.get('voucher_number'),
+                        additional_costs=payload.get('additional_costs'),
+                        bom_name=payload.get('bom_name'), godown=payload.get('godown'))}
                 elif path=='/api/import_preview': result=preview_import(db,payload)
                 elif path in ('/api/import','/api/restore'): result=apply_import(db,payload)
                 else: return self.send({'status':'error','error':'Unknown endpoint'},404)

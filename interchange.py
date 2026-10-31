@@ -332,10 +332,10 @@ def _candidate(books,payload):
                         if canonical: record['system_group']=canonical
                 if kind=='ledger':
                     if node.find('OPENINGBALANCE') is not None or action!='Alter': record.update(opening_balance=str(abs(decimal(_findtext(node,'OPENINGBALANCE',0),'0.01'))),drcr='Dr' if decimal(_findtext(node,'OPENINGBALANCE',0))<=0 else 'Cr')
-                    for tag,key in (('PARTYGSTIN','gstin'),('ADDRESS','address'),('ISBILLWISEON','is_billwise')):
+                    for tag,key in (('PARTYGSTIN','gstin'),('ADDRESS','address'),('ISBILLWISEON','is_billwise'),('CREDITLIMIT','credit_limit')):
                         if _findall(node,tag): record[key]=_findtext(node,tag,'')
                 elif kind=='stock_item':
-                    for tag,key in (('BASEUNITS','base_units'),('OPENINGBALANCE','opening_qty'),('OPENINGVALUE','opening_balance'),('OPENINGRATE','opening_rate'),('CATEGORY','category')):
+                    for tag,key in (('BASEUNITS','base_units'),('OPENINGBALANCE','opening_qty'),('OPENINGVALUE','opening_balance'),('OPENINGRATE','opening_rate'),('CATEGORY','category'),('HSNCODE','hsn_code'),('HSN','hsn_code'),('DESCRIPTION','description')):
                         if _findall(node,tag):
                             value=_findtext(node,tag,'')
                             if key=='base_units' and value.strip() in ('Not Applicable', 'None', ''): value = ''
@@ -430,8 +430,11 @@ def export_xml(company):
             if kind=='voucher_type': mapped['PARENT']=record.get('base_type',name)
             if kind=='ledger': mapped.update(OPENINGBALANCE=str(-decimal(record.get('signed_opening',0),'0.01')),PARTYGSTIN=record.get('gstin',''))
             if kind=='ledger': mapped.update(ISBILLWISEON=record.get('is_billwise','No'),ADDRESS=record.get('address',''))
+            if kind=='ledger' and record.get('credit_limit'): mapped['CREDITLIMIT']=str(record['credit_limit'])
             if kind=='stock_item': mapped.update(BASEUNITS=record.get('base_units',''),OPENINGBALANCE=str(record.get('opening_qty',0)),OPENINGVALUE=str(record.get('opening_balance',0)),OPENINGRATE=str(record.get('opening_rate',0)))
             if kind=='stock_item': mapped['CATEGORY']=record.get('category','Primary')
+            if kind=='stock_item' and (record.get('hsn_code') or record.get('hsn')): mapped['HSNCODE']=str(record.get('hsn_code') or record.get('hsn'))
+            if kind=='stock_item' and record.get('description'): mapped['DESCRIPTION']=str(record['description'])
             if kind=='unit': mapped.update(UNITTYPE=record.get('type','quantity'),BASEUNIT=record.get('base_unit',name),UNITFACTOR=str(record.get('factor','1')),DECIMALPLACES=str(record.get('decimal_places','')))
             for key,value in mapped.items():
                 node=element.find(key)
@@ -591,6 +594,7 @@ def bulk_import_masters(db, company, master_type, content, file_format='csv'):
                     'address': r.get('Address') or '',
                     'pincode': r.get('Pincode') or '',
                     'credit_period': r.get('Credit Days') or '',
+                    'credit_limit': r.get('Credit Limit') or r.get('credit_limit') or '',
                 }
                 is_new = db.save_master(company, 'ledger', record)
                 if is_new: created += 1
