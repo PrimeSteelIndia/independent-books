@@ -1,0 +1,31 @@
+# Independent Books
+> Free, open-source (MIT), offline double-entry accounting software with GST billing and Tally Prime keyboard shortcuts.
+
+Canonical host: https://idpbook.com
+Source: https://github.com/PrimeSteelIndia/independent-books
+Licence: MIT
+
+## Pages
+- [Home](https://idpbook.com/)
+- [Free accounting software](https://idpbook.com/free-accounting-software/)
+- [Free accounting software India](https://idpbook.com/free-accounting-software-india/)
+- [For small business](https://idpbook.com/free-accounting-software-for-small-business/)
+- [Download for PC](https://idpbook.com/free-accounting-software-for-pc/)
+- [Tally Prime alternative](https://idpbook.com/free-tally-prime-alternative/)
+- [Zoho Books alternative](https://idpbook.com/free-zoho-books-alternative/)
+- [Free GST billing software](https://idpbook.com/free-gst-billing-software/)
+- [Free billing software](https://idpbook.com/free-billing-software/)
+- [Free bookkeeping software](https://idpbook.com/free-bookkeeping-software/)
+- [Free invoice software](https://idpbook.com/free-invoice-software/)
+- [Open source accounting](https://idpbook.com/open-source-accounting-software/)
+- [Free inventory software](https://idpbook.com/free-inventory-management-software/)
+- [Free ERP for SMBs](https://idpbook.com/free-erp-software-small-business/)
+- [vs Tally Prime](https://idpbook.com/compare-tally-prime-vs-independent-books/)
+- [vs Zoho Books](https://idpbook.com/compare-zoho-books-vs-independent-books/)
+
+## Facts
+- No subscription, no per-user or per-company fee, no telemetry.
+- Data stored in a local SQLite file; backend binds to 127.0.0.1.
+- Platforms: Windows 10/11, macOS, Linux, Android via LAN/PWA.
+- GST: automatic CGST+SGST (intra-state) or IGST (inter-state).
+- Migrates from Tally Prime via XML import.
