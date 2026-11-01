@@ -21,9 +21,7 @@
   <meta name="twitter:image" content="https://idpbook.com/assets/social-preview.png">
   <link rel="icon" type="image/png" sizes="64x64" href="/assets/favicon.png">
   <link rel="apple-touch-icon" href="/assets/logo.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/assets/fonts/plus-jakarta-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script type="application/ld+json">
   {
@@ -103,8 +101,8 @@
 <body>
   <header class="topbar">
     <div class="container topbar__inner">
-      <a class="brand" href="/" aria-label="Independent Books home">
-        <img class="brand__logo" src="/assets/logo.png" alt="Independent Books logo" width="36" height="36">
+      <a class="brand" href="/">
+        <img class="brand__logo" src="/assets/logo.png" alt="" width="43" height="36">
         <span class="brand__text"><span>Independent</span><strong>BOOKS</strong></span>
       </a>
       <nav class="topnav" aria-label="Primary">
@@ -145,7 +143,7 @@
 
 
       <h2>Moving your existing company across</h2>
-      <p>Export from Tally as XML and import in Independent Books with Import → Import XML. Preview the counts, commit, then reconcile closing balances against a Tally trial balance for the same date before you rely on the new system for filing.</p>
+      <p>Export from Tally as XML and import in Independent Books with Import → Import XML. Preview the counts, commit, then reconcile closing balances against a Tally trial balance for the same date before you rely on the new system for filing. Follow our step-by-step Tally Prime XML import tutorial for detailed instructions.</p>
       <p>The honest test is one financial year, not one voucher. Import a completed year and compare the final balance sheet line by line.</p>
 
 
@@ -180,9 +178,9 @@
       <h2>Related reading</h2>
       <ul>
         <li><a href="/compare-tally-prime-vs-independent-books/">Tally Prime vs Independent Books — Licence, Data and Workflow</a></li>
+        <li><a href="/guides/import-tally-prime-xml/">How to Import Tally Prime XML into Independent Books</a></li>
         <li><a href="/free-accounting-software-india/">Free Accounting Software in India — GST Ready, Offline, No Fees</a></li>
         <li><a href="/free-accounting-software/">Free Accounting Software — Offline, Open Source, No Subscription</a></li>
-        <li><a href="/open-source-accounting-software/">Open Source Accounting Software — MIT Licensed &amp; Auditable</a></li>
       </ul>
     </section>
   </main>
@@ -192,13 +190,13 @@
       <div class="footer__grid">
         <div class="footer__brand-col">
           <div class="brand">
-            <img class="brand__logo" src="/assets/logo.png" alt="Independent Books logo" width="32" height="32">
+            <img class="brand__logo" src="/assets/logo.png" alt="" width="39" height="32">
             <span class="brand__text"><span>Independent</span><strong>BOOKS</strong></span>
           </div>
           <p>Free, open-source, offline accounting software for independent businesses and accountants. MIT licensed.</p>
         </div>
         <div class="footer__col">
-          <h4>Guides</h4>
+          <h3>Guides</h3>
           <ul>
             <li><a href="/free-accounting-software/">Free accounting software</a></li>
             <li><a href="/free-accounting-software-india/">Free accounting software India</a></li>
@@ -207,7 +205,7 @@
           </ul>
         </div>
         <div class="footer__col">
-          <h4>Compare</h4>
+          <h3>Compare</h3>
           <ul>
             <li><a href="/compare-tally-prime-vs-independent-books/">Independent Books vs Tally Prime</a></li>
             <li><a href="/compare-zoho-books-vs-independent-books/">Independent Books vs Zoho Books</a></li>
@@ -215,7 +213,7 @@
           </ul>
         </div>
         <div class="footer__col">
-          <h4>Project</h4>
+          <h3>Project</h3>
           <ul>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books" target="_blank" rel="noopener">GitHub repository</a></li>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books/blob/master/LICENSE" target="_blank" rel="noopener">MIT licence</a></li>

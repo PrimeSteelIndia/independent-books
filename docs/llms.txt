@@ -22,6 +22,7 @@ Licence: MIT
 - [Free ERP for SMBs](https://idpbook.com/free-erp-software-small-business/)
 - [vs Tally Prime](https://idpbook.com/compare-tally-prime-vs-independent-books/)
 - [vs Zoho Books](https://idpbook.com/compare-zoho-books-vs-independent-books/)
+- [Tally Prime XML import](https://idpbook.com/guides/import-tally-prime-xml/)
 
 ## Facts
 - No subscription, no per-user or per-company fee, no telemetry.

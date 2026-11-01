@@ -85,9 +85,7 @@
   
   <link rel="icon" type="image/png" sizes="64x64" href="/assets/favicon.png">
   <link rel="apple-touch-icon" href="/assets/logo.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="/assets/fonts/plus-jakarta-sans.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script type="application/ld+json">
   {
@@ -115,8 +113,8 @@
   <!-- ======================= TOPBAR ======================= -->
   <header class="topbar">
     <div class="container topbar__inner">
-      <a class="brand" href="#" aria-label="Independent Books Home">
-        <img class="brand__logo" src="/assets/logo.png" alt="Logo" width="36" height="36">
+      <a class="brand" href="/">
+        <img class="brand__logo" src="/assets/logo.png" alt="" width="39" height="32">
         <span class="brand__text"><span>Independent</span><strong>BOOKS</strong></span>
       </a>
 
@@ -197,7 +195,7 @@
       <div class="calc-box">
         <div class="calc-header">
           <span class="section-eyebrow">The Cost of Renting Your Own Books</span>
-          <h3>How Much Does Software "Subscription Rent" Cost You?</h3>
+          <h2>How Much Does Software "Subscription Rent" Cost You?</h2>
           <p>Traditional accounting vendors charge you year after year just to access your own ledger. Slide to see your cumulative capital loss:</p>
         </div>
 
@@ -206,7 +204,7 @@
             <span>Operating Timeframe:</span>
             <span><strong id="rentYearsDisplay">5 Years</strong></span>
           </div>
-          <input type="range" min="1" max="10" value="5" class="calc-slider" id="rentYearsSlider">
+          <input type="range" min="1" max="10" value="5" class="calc-slider" id="rentYearsSlider" aria-label="Number of subscription years">
         </div>
 
         <div class="calc-grid">
@@ -228,7 +226,7 @@
           <div class="calc-card highlight">
             <div class="calc-card__title">Independent Books</div>
             <div class="calc-card__cost">₹0.00</div>
-            <div class="calc-card__desc"><strong id="savedCostDisplay" style="color:#059669;">₹1,12,500 Saved</strong> · 100% Free Forever Under MIT License</div>
+            <div class="calc-card__desc"><strong id="savedCostDisplay" style="color:#047857;">₹1,12,500 Saved</strong> · 100% Free Forever Under MIT License</div>
           </div>
         </div>
       </div>
@@ -304,7 +302,7 @@
                 <div class="sim-chart-card">
                   <div class="sim-chart-header">
                     <strong>Weekly Sales Trend</strong>
-                    <span style="font-size:0.85rem; font-weight:700; color:#059669;">+18.4% vs last week</span>
+                    <span style="font-size:0.85rem; font-weight:700; color:#047857;">+18.4% vs last week</span>
                   </div>
                   <!-- Vector Trend SVG -->
                   <svg viewBox="0 0 600 160" width="100%" height="160" fill="none">
@@ -315,11 +313,11 @@
                       </linearGradient>
                     </defs>
                     <path d="M 0 130 Q 100 110, 150 90 T 300 100 T 450 40 T 600 20 L 600 160 L 0 160 Z" fill="url(#chartGradient)"/>
-                    <path d="M 0 130 Q 100 110, 150 90 T 300 100 T 450 40 T 600 20" stroke="#059669" stroke-width="3" stroke-linecap="round"/>
+                    <path d="M 0 130 Q 100 110, 150 90 T 300 100 T 450 40 T 600 20" stroke="#047857" stroke-width="3" stroke-linecap="round"/>
                     <circle cx="150" cy="90" r="5" fill="#0284c7"/>
                     <circle cx="300" cy="100" r="5" fill="#0284c7"/>
                     <circle cx="450" cy="40" r="5" fill="#0284c7"/>
-                    <circle cx="600" cy="20" r="6" fill="#059669"/>
+                    <circle cx="600" cy="20" r="6" fill="#047857"/>
                   </svg>
                 </div>
               </div>
@@ -339,7 +337,7 @@
 
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
                 <div>
-                  <label style="font-size:0.85rem; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px;">Party A/c Name</label>
+                  <label for="sim-party" style="font-size:0.85rem; font-weight:700; color:var(--text-muted); display:block; margin-bottom:6px;">Party A/c Name</label>
                   <select id="sim-party" style="width:100%; padding:10px 14px; background:var(--bg-mint-wash); color:var(--text-heading); font-weight:600; border:1px solid var(--border-mint); border-radius:8px; outline:none;">
                     <option value="intra">M/s Local Steel Traders (Intra-State: CGST + SGST)</option>
                     <option value="inter">M/s National Infrastructure (Inter-State: IGST)</option>
@@ -364,8 +362,8 @@
                 <tbody>
                   <tr>
                     <td style="padding:14px 0; font-weight:700; color:var(--text-heading);">Heavy Structural Steel Beams (HSN 7216)</td>
-                    <td><input id="sim-qty" type="number" value="10" min="1" style="width:90px; padding:8px 10px; background:#ffffff; color:var(--text-heading); font-weight:700; border:1px solid var(--border-mint); border-radius:6px;"></td>
-                    <td><input id="sim-rate" type="number" value="5000" min="100" style="width:110px; padding:8px 10px; background:#ffffff; color:var(--text-heading); font-weight:700; border:1px solid var(--border-mint); border-radius:6px;"></td>
+                    <td><input id="sim-qty" type="number" value="10" min="1" aria-label="Quantity" style="width:90px; padding:8px 10px; background:#ffffff; color:var(--text-heading); font-weight:700; border:1px solid var(--border-mint); border-radius:6px;"></td>
+                    <td><input id="sim-rate" type="number" value="5000" min="100" aria-label="Rate per unit in rupees" style="width:110px; padding:8px 10px; background:#ffffff; color:var(--text-heading); font-weight:700; border:1px solid var(--border-mint); border-radius:6px;"></td>
                     <td style="text-align:right; font-weight:800; font-family:var(--font-mono); color:var(--accent-deep); font-size:1.1rem;" id="sim-taxable">₹50,000.00</td>
                   </tr>
                 </tbody>
@@ -375,11 +373,11 @@
               <div style="background:var(--bg-mint-wash); padding:18px 22px; border-radius:10px; border:1px dashed var(--border-mint); margin-bottom:20px;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.92rem;" id="sim-cgst-row">
                   <span style="color:var(--text-body); font-weight:600;">Central GST (CGST @ 9%):</span>
-                  <span style="font-family:var(--font-mono); font-weight:700; color:#059669;" id="sim-cgst">₹4,500.00</span>
+                  <span style="font-family:var(--font-mono); font-weight:700; color:#047857;" id="sim-cgst">₹4,500.00</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.92rem;" id="sim-sgst-row">
                   <span style="color:var(--text-body); font-weight:600;">State GST (SGST @ 9%):</span>
-                  <span style="font-family:var(--font-mono); font-weight:700; color:#059669;" id="sim-sgst">₹4,500.00</span>
+                  <span style="font-family:var(--font-mono); font-weight:700; color:#047857;" id="sim-sgst">₹4,500.00</span>
                 </div>
                 <div style="display:none; justify-content:space-between; margin-bottom:8px; font-size:0.92rem;" id="sim-igst-row">
                   <span style="color:var(--text-body); font-weight:600;">Integrated GST (IGST @ 18%):</span>
@@ -680,7 +678,7 @@
               <li>Includes clean uninstaller</li>
             </ul>
           </div>
-          <a class="btn btn--primary" href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.exe" download>
+          <a class="btn btn--primary" href="https://idpbook.com/downloads/IndependentBooksSetup.exe" download>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>
             Download Installer (.exe)
           </a>
@@ -698,7 +696,7 @@
               <li>Double-click Launch.vbs to run</li>
             </ul>
           </div>
-          <a class="btn btn--secondary" href="https://independent-books.pages.dev/downloads/IndependentBooks_Portable.zip" download>
+          <a class="btn btn--secondary" href="https://idpbook.com/downloads/IndependentBooks_Portable.zip" download>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download Portable (.zip)
           </a>
@@ -717,7 +715,7 @@
             </ul>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px;">
-            <a class="btn btn--primary" href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.dmg" download>
+            <a class="btn btn--primary" href="https://idpbook.com/downloads/IndependentBooksSetup.dmg" download>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>
               Download macOS DMG (14.3 MB)
             </a>
@@ -892,14 +890,14 @@
       <div class="footer__grid">
         <div class="footer__brand-col">
           <div class="brand">
-            <img class="brand__logo" src="/assets/logo.png" alt="Logo" width="32" height="32">
+            <img class="brand__logo" src="/assets/logo.png" alt="" width="39" height="32">
             <span class="brand__text"><span>Independent</span><strong>BOOKS</strong></span>
           </div>
           <p>Free, air-gapped double-entry accounting software for independent businesses and accountants worldwide.</p>
         </div>
 
         <div class="footer__col">
-          <h4>Navigation</h4>
+          <h3>Navigation</h3>
           <ul>
             <li><a href="#simulator">Live Simulator</a></li>
             <li><a href="#calculator">Savings Calculator</a></li>
@@ -913,18 +911,18 @@
         </div>
 
         <div class="footer__col">
-          <h4>Downloads</h4>
+          <h3>Downloads</h3>
           <ul>
-            <li><a href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.exe">Windows Installer</a></li>
-            <li><a href="https://independent-books.pages.dev/downloads/IndependentBooks_Portable.zip">Portable ZIP Edition</a></li>
-            <li><a href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.dmg">macOS DMG Installer (14.3 MB)</a></li>
+            <li><a href="https://idpbook.com/downloads/IndependentBooksSetup.exe">Windows Installer</a></li>
+            <li><a href="https://idpbook.com/downloads/IndependentBooks_Portable.zip">Portable ZIP Edition</a></li>
+            <li><a href="https://idpbook.com/downloads/IndependentBooksSetup.dmg">macOS DMG Installer (14.3 MB)</a></li>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books/releases">GitHub Releases</a></li>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books">Source Code</a></li>
           </ul>
         </div>
 
         <div class="footer__col">
-          <h4>Community & Open Source</h4>
+          <h3>Community &amp; Open Source</h3>
           <ul>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books" target="_blank" rel="noopener">GitHub Repository</a></li>
             <li><a href="https://github.com/PrimeSteelIndia/independent-books/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
