@@ -80,8 +80,7 @@ $HasNative = (Test-Path (Join-Path $NativeDist "app_server.exe")) -and (-not $Sk
 if ($HasNative) {
     Write-Host "`n[NATIVE COMPILATION] Packaging compiled C machine code binary (Zero Python source files)..." -ForegroundColor Cyan
     Copy-Item -Path "$NativeDist\*" -Destination $AppStage -Recurse -Force
-    $FrontendFiles = @("index.html", "fidelity.css", "workflows.js", "voucher_logic.js", "lookup_context.js", "print_view.js", "date_picker.js", "Launch.ps1", "Launch.vbs", "logo.png", "favicon.ico", "app.ico", "manifest.json",
-    "version.json")
+    $FrontendFiles = @("index.html", "fidelity.css", "workflows.js", "voucher_logic.js", "lookup_context.js", "print_view.js", "date_picker.js", "logo.png", "favicon.ico", "app.ico", "manifest.json", "version.json")
     foreach ($file in $FrontendFiles) {
         Copy-Item -Path (Join-Path $AppRoot $file) -Destination $AppStage -Force
     }
@@ -97,6 +96,9 @@ if ($HasNative) {
     }
     Write-Host "  [OK] Native C app_server.exe and libraries included" -ForegroundColor Green
     Write-Host "  [OK] Source Python (.py) files excluded for anti-reverse engineering" -ForegroundColor Green
+    # Strip unused modules to keep size ultra-compact
+    Remove-Item (Join-Path $AppStage "numpy"), (Join-Path $AppStage "numpy.libs"), (Join-Path $AppStage "PIL") -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "  [OK] Stripped unused modules (Numpy/PIL) for compact package" -ForegroundColor Green
 } else {
     Write-Host "`nCopying application assets to staging directory..." -ForegroundColor Yellow
     foreach ($file in $CoreFiles) {
@@ -113,18 +115,37 @@ if ($HasNative) {
 # Add installed marker
 Set-Content -Path (Join-Path $AppStage "installed.marker") -Value "independent-books-installed" -Encoding UTF8
 
-# 3b. Build Portable ZIP Package
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$PortableZipPath = Join-Path $DistPath "IndependentBooks_Portable.zip"
-Write-Host "`nGenerating standalone Portable ZIP package..." -ForegroundColor Yellow
-if (Test-Path $PortableZipPath) { Remove-Item $PortableZipPath -Force }
-[System.IO.Compression.ZipFile]::CreateFromDirectory($AppStage, $PortableZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-Write-Host "  [OK] Portable ZIP created: $('{0:N2} MB' -f ((Get-Item $PortableZipPath).Length / 1MB))" -ForegroundColor Green
+# Portable ZIP moved to Step 7b
 
 
 # 4. Generate Native Windows Launcher (IndependentBooks.exe)
+$gccDir = "C:\Users\Prime Steel\AppData\Local\Nuitka\Nuitka\Cache\downloads\gcc\x86_64\15.2.0posix-13.0.0-msvcrt-r6\mingw64\bin"
+$gccPath = Join-Path $gccDir "gcc.exe"
+$windresPath = Join-Path $gccDir "windres.exe"
 $cscPath = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if (Test-Path $cscPath) {
+$stageExe = Join-Path $AppStage "IndependentBooks.exe"
+$appIco = Join-Path $AppRoot "app.ico"
+$launcherC = Join-Path $AppRoot "launcher.c"
+
+if ((Test-Path $gccPath) -and (Test-Path $launcherC)) {
+    Write-Host "`nCompiling clean native Win32 C launcher with GCC (IndependentBooks.exe)..." -ForegroundColor Cyan
+    $fso = New-Object -ComObject Scripting.FileSystemObject
+    $shortGcc = $fso.GetFile($gccPath).ShortPath
+    $shortWindres = $fso.GetFile($windresPath).ShortPath
+
+    Push-Location $DistPath
+    if ((Test-Path $windresPath) -and (Test-Path $appIco)) {
+        Set-Content -Path "app.rc" -Value '1 ICON "../app.ico"' -Encoding Ascii
+        & $shortWindres --preprocessor="$shortGcc -E -xc-header -DRC_INVOKED" -i app.rc -o app_res.o
+        & $shortGcc -O2 -mwindows -o $stageExe $launcherC "app_res.o"
+        Remove-Item "app.rc", "app_res.o" -ErrorAction SilentlyContinue
+    } else {
+        & $shortGcc -O2 -mwindows -o $stageExe $launcherC
+    }
+    Pop-Location
+    Copy-Item $stageExe -Destination (Join-Path $AppRoot "IndependentBooks.exe") -Force
+    Write-Host "  [OK] Clean Native C IndependentBooks.exe generated successfully" -ForegroundColor Green
+} elseif (Test-Path $cscPath) {
     Write-Host "`nCompiling native Windows launcher (IndependentBooks.exe)..." -ForegroundColor Yellow
     $launcherCs = @"
 using System;
@@ -337,9 +358,78 @@ Write-Host "Shortcuts removed. To complete removal, delete directory: `$PSScript
 Set-Content -Path $UninstallScriptPath -Value $UninstallContent -Encoding UTF8
 Write-Host "  [OK] Generated uninstall.ps1" -ForegroundColor Green
 
-# 8. Check Inno Setup Compiler or Build Native Single-File Setup .exe
-$InnoCompiler = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
-if ($InnoCompiler) {
+# 7b. Build Clean Portable ZIP Package (Zero .vbs / .ps1 script files for Safe Browsing compliance)
+Get-ChildItem -Path $AppStage -Include "*.vbs", "*.ps1", "*.bat" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$PortableZipPath = Join-Path $DistPath "IndependentBooks_Portable.zip"
+Write-Host "`nGenerating standalone Portable ZIP package (Clean of script files)..." -ForegroundColor Yellow
+if (Test-Path $PortableZipPath) { Remove-Item $PortableZipPath -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory($AppStage, $PortableZipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+Write-Host "  [OK] Portable ZIP created: $('{0:N2} MB' -f ((Get-Item $PortableZipPath).Length / 1MB))" -ForegroundColor Green
+
+# 8. Compile Native Installer with NSIS (Nullsoft Scriptable Install System)
+$NsisExe = "$env:LOCALAPPDATA\Programs\NSIS\makensis.exe"
+if (-not (Test-Path $NsisExe)) {
+    $nsisCmd = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
+    if ($nsisCmd) { $NsisExe = $nsisCmd.Source }
+}
+
+if (Test-Path $NsisExe) {
+    Write-Host "`nCompiling NSIS-3 Installer with $NsisExe (Matches v1.0.0 clean engine)..." -ForegroundColor Cyan
+    $finalExePath = Join-Path $DistPath $OutputExe
+    $nsiPath = Join-Path $DistPath "installer.nsi"
+    $nsiContent = @"
+Unicode True
+SetCompressor /SOLID lzma
+
+Name "Independent Books"
+OutFile "$finalExePath"
+InstallDir "`$LOCALAPPDATA\Programs\IndependentBooks"
+RequestExecutionLevel user
+
+!include "MUI2.nsh"
+
+!define MUI_ICON "$appIco"
+!define MUI_UNICON "$appIco"
+!define MUI_ABORTWARNING
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN "`$INSTDIR\IndependentBooks.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch Independent Books"
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Section "MainSection" SecMain
+    SetOutPath "`$INSTDIR"
+    File /r "$AppStage\*.*"
+    WriteUninstaller "`$INSTDIR\uninstall.exe"
+
+    CreateDirectory "`$SMPROGRAMS\Independent Books"
+    CreateShortcut "`$SMPROGRAMS\Independent Books\Independent Books.lnk" "`$INSTDIR\IndependentBooks.exe" "" "`$INSTDIR\app.ico" 0
+    CreateShortcut "`$SMPROGRAMS\Independent Books\Uninstall Independent Books.lnk" "`$INSTDIR\uninstall.exe" "" "`$INSTDIR\app.ico" 0
+    CreateShortcut "`$DESKTOP\Independent Books.lnk" "`$INSTDIR\IndependentBooks.exe" "" "`$INSTDIR\app.ico" 0
+SectionEnd
+
+Section "Uninstall"
+    Delete "`$DESKTOP\Independent Books.lnk"
+    RMDir /r "`$SMPROGRAMS\Independent Books"
+    RMDir /r "`$INSTDIR"
+SectionEnd
+"@
+    Set-Content -Path $nsiPath -Value $nsiContent -Encoding Ascii
+    & $NsisExe $nsiPath
+    Write-Host "Successfully generated NSIS installer: $finalExePath" -ForegroundColor Green
+} else {
+    # Fallback to Inno Setup
+    $InnoCompiler = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+    $InnoPath = if ($InnoCompiler) { $InnoCompiler.Source } elseif (Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") { "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" } else { $null }
+    if ($InnoPath) {
     Write-Host "`nCompiling Inno Setup Installer with $($InnoCompiler.Source)..." -ForegroundColor Yellow
     $IssPath = Join-Path $DistPath "installer.iss"
     $IssContent = @"
@@ -540,5 +630,6 @@ namespace IndependentBooksSetup
     Write-Host "  Installer size: $('{0:N2} MB' -f ((Get-Item $finalExe).Length / 1MB))" -ForegroundColor Cyan
 }
 
+}
 Write-Host "`nPackaging completed successfully!" -ForegroundColor Green
 return 0

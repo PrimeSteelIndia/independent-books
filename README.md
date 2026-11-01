@@ -14,7 +14,7 @@
   *Fast, keyboard-driven double-entry bookkeeping with 100% offline SQLite storage, zero subscriptions, and zero telemetry.*
 
   <p align="center">
-    <a href="https://github.com/zoro-roronoa74/independent-books/stargazers"><img src="https://img.shields.io/github/stars/zoro-roronoa74/independent-books?style=for-the-badge&logo=github&color=38bdf8" alt="GitHub Stars" /></a>
+    <a href="https://github.com/PrimeSteelIndia/independent-books/stargazers"><img src="https://img.shields.io/github/stars/PrimeSteelIndia/independent-books?style=for-the-badge&logo=github&color=38bdf8" alt="GitHub Stars" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-emerald?style=for-the-badge" alt="MIT License" /></a>
     <a href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.exe"><img src="https://img.shields.io/badge/Download_Windows-8.6_MB-6366f1?style=for-the-badge&logo=windows" alt="Windows Installer" /></a>
     <a href="https://independent-books.pages.dev/downloads/IndependentBooksSetup.dmg"><img src="https://img.shields.io/badge/Download_macOS-14.3_MB-000000?style=for-the-badge&logo=apple" alt="macOS DMG Installer" /></a>
@@ -117,13 +117,13 @@ Most modern accounting software forces businesses into expensive cloud subscript
 Independent Books supports macOS with dedicated user data storage in `~/Library/Application Support/IndependentBooks/`:
 
 1. **Direct DMG Installer (Recommended — Universal Apple Silicon & Intel)**:
-   - Download **[IndependentBooksSetup.dmg (14.3 MB)](https://independent-books.pages.dev/downloads/IndependentBooksSetup.dmg)** (or from [GitHub Releases](https://github.com/zoro-roronoa74/independent-books/releases)).
+   - Download **[IndependentBooksSetup.dmg (14.3 MB)](https://independent-books.pages.dev/downloads/IndependentBooksSetup.dmg)** (or from [GitHub Releases](https://github.com/PrimeSteelIndia/independent-books/releases)).
    - Open `IndependentBooksSetup.dmg` and drag **Independent Books** into your `Applications` folder.
    - Launch and enjoy 100% offline accounting with identical Tally Prime keyboard muscle memory!
 
 2. **One-Command Shell Runner**:
    ```bash
-   git clone https://github.com/zoro-roronoa74/independent-books.git
+   git clone https://github.com/PrimeSteelIndia/independent-books.git
    cd independent-books
    chmod +x launch_mac.sh
    ./launch_mac.sh
@@ -159,7 +159,7 @@ Independent Books is fully responsive and supports touch-first voucher creation 
 ### 💻 Run from Source (Universal)
 Independent Books runs directly on Python 3.9+ with zero required external dependencies for core accounting:
 ```bash
-git clone https://github.com/zoro-roronoa74/independent-books.git
+git clone https://github.com/PrimeSteelIndia/independent-books.git
 cd independent-books
 python app_server.py --port 3543
 ```

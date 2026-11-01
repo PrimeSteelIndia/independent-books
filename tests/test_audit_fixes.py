@@ -257,5 +257,5 @@ def test_check_update_status_and_url(tmp_path):
     url = f"http://127.0.0.1:{server.server_port}/api/check_update"
     resp = json.loads(urllib.request.urlopen(url, timeout=3).read())
     assert resp['status'] == 'success'
-    assert 'zoro-roronoa74' in resp['release_url']
+    assert 'PrimeSteelIndia' in resp['release_url']
     server.shutdown()

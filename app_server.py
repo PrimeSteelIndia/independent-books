@@ -29,7 +29,7 @@ def _fetch_remote_version():
     import urllib.error
     endpoints = [
         'https://idpbook.com/version.json',
-        'https://raw.githubusercontent.com/zoro-roronoa74/independent-books/master/version.json'
+        'https://raw.githubusercontent.com/PrimeSteelIndia/independent-books/master/version.json'
     ]
     for url in endpoints:
         try:
