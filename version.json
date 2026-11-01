@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "name": "Independent Books v1.1.0 (Tally Prime Parity & GST Edition)",
-  "release_date": "2026-10-31",
+  "version": "1.1.2",
+  "name": "Independent Books v1.1.2 (Tally Prime Parity & GST Edition)",
+  "release_date": "2026-11-01",
   "min_required_version": "1.0.0",
   "highlights": [
     "Official GSTR-1 (B2B, B2CL, B2CS, HSN) and GSTR-3B with 1-click JSON export for GST Portal",
@@ -13,21 +13,19 @@
     "Automated Update Checker to keep your accounting engine up to date"
   ],
   "download_url": "https://idpbook.com",
-  "download_exe": "https://idpbook.com/downloads/releases/1.1.0-r2/IndependentBooks-Setup-1.1.0-r2.exe",
-  "download_zip": "https://idpbook.com/downloads/IndependentBooks_Portable.zip",
-  "packaging_revision": "2",
-  "download_installer_zip": "https://idpbook.com/downloads/releases/1.1.0-r2/IndependentBooks_Installer.zip",
-  "download_zip_kind": "legacy_portable",
+  "download_exe": "https://github.com/PrimeSteelIndia/independent-books/releases/download/v1.1.2/IndependentBooksSetup.exe",
+  "download_zip": "https://github.com/PrimeSteelIndia/independent-books/releases/download/v1.1.2/IndependentBooks_Portable.zip",
+  "packaging_revision": "4",
   "installer_artifacts": {
-    "zip": {
-      "url": "https://idpbook.com/downloads/releases/1.1.0-r2/IndependentBooks_Installer.zip",
-      "bytes": 13645384,
-      "sha256": "6f2767827cdfee86bbb142f54e3d9dc2889c398a08d0a930bb90d6146ebfd5df"
-    },
     "exe": {
-      "url": "https://idpbook.com/downloads/releases/1.1.0-r2/IndependentBooks-Setup-1.1.0-r2.exe",
-      "bytes": 14193621,
-      "sha256": "525f36623121e5669182a1c6c27ac84f91c41935705edba5e176ad0844c681a1"
+      "url": "https://github.com/PrimeSteelIndia/independent-books/releases/download/v1.1.2/IndependentBooksSetup.exe",
+      "bytes": 13001009,
+      "sha256": "d970ec879fb70e2f90efdbd38623474618284d847ebc383881857b70724c3d28"
+    },
+    "zip": {
+      "url": "https://github.com/PrimeSteelIndia/independent-books/releases/download/v1.1.2/IndependentBooks_Portable.zip",
+      "bytes": 18739121,
+      "sha256": "1e51992e4831cb24626266a8cc5858fd15877b34a7ea986ba7c1cf512e682b25"
     }
   }
 }
